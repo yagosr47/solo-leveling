@@ -26,3 +26,42 @@ nav button{border-color:#2d6171;background:linear-gradient(#102b3aee,#071622ee);
 @keyframes stars{from{background-position:24px 40px,80px 12px,0 0}to{background-position:24px -117px,80px -177px,0 0}}@keyframes promptPulse{50%{box-shadow:0 0 22px #00ccff99,inset 0 0 14px #157d9a88}}
 @media(max-height:700px){.start-window{margin-top:18px}.window-body{padding:14px}.start-hint{margin-top:14px}.start-top,.start-bottom{margin-top:12px;margin-bottom:12px}h1{margin:8px 0}.quest{top:195px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important}}
+
+/* Art direction: a cinematic gate behind a legible, local system interface. */
+#start{
+  background:linear-gradient(180deg,rgba(2,8,17,.46),rgba(3,11,22,.20) 36%,rgba(2,7,15,.76)),
+    radial-gradient(ellipse at 50% 46%,rgba(6,29,45,.15),rgba(0,5,13,.48) 75%),
+    url('assets/title-background.png') center center / cover no-repeat,#030a13;
+}
+#start:before{opacity:.2}
+.start-top,.start-bottom{font-size:10px;color:#a8d2dc;text-shadow:0 1px 5px #000}
+.start-content{padding:0 14px}
+.start-kicker{color:#b4e9f1;text-shadow:0 1px 8px #000}
+h1{font-family:Georgia,serif;font-size:clamp(40px,6vw,76px);letter-spacing:.08em;color:#f2fbff;text-shadow:0 3px 0 #0b2736,0 3px 15px #000,0 0 30px #4ac9ec88}
+h1 em{color:#a8efff}
+.start-line{color:#c2ebf2;text-shadow:0 2px 6px #000}
+.start-window{background:repeating-linear-gradient(0deg,#3cb3d112 0 1px,transparent 1px 4px),linear-gradient(160deg,#0a3046f5,#061323f8);backdrop-filter:blur(3px)}
+.window-title{font-weight:bold;letter-spacing:1.4px}
+.window-body p{color:#dcf3f6;text-shadow:0 1px 3px #00131b}
+.window-body button{min-width:175px;margin:3px;transition:transform .15s,background .15s,box-shadow .15s}
+.window-body button:hover{transform:translateY(-2px)}
+.window-body button:focus-visible,nav button:focus-visible,.modal-box button:focus-visible{outline:2px solid #efffff;outline-offset:3px}
+.start-hint{color:#9cc7d3;text-shadow:0 2px 5px #000}
+.portrait:before,.portrait:after{display:none}
+#portraitCanvas{display:block;width:100%;height:100%;object-fit:cover;image-rendering:pixelated;filter:drop-shadow(0 0 5px #23a9cf)}
+.portrait span{z-index:1;text-shadow:0 0 6px #00d6ff}
+.hot b{display:block;height:42px;line-height:normal}
+.hot b svg{display:block;width:34px;height:34px;margin:3px auto 0;filter:drop-shadow(0 0 5px #34c5ff99)}
+.hot.purple b svg{filter:drop-shadow(0 0 5px #bb56ff)}
+.hot.red b svg{filter:drop-shadow(0 0 4px #f35b72)}
+.hot kbd{z-index:1;background:#061822cc;border:1px solid #367084;padding:1px 3px}
+.hot small{white-space:nowrap}
+.meter i{transition:width .2s ease-out}
+.progress i{transition:width .3s ease-out;box-shadow:0 0 7px #48e6ff}
+.boss-meter{box-shadow:0 0 12px #ff4a5f66}.boss-meter i{box-shadow:0 0 8px #fe4f6b}
+.modal-box{max-width:calc(100vw - 28px);scrollbar-color:#48d8ed #071a2a;scrollbar-width:thin}
+.modal-title{position:sticky;top:0;z-index:1}
+.stat-row,.item-row{min-height:48px;gap:10px;background:linear-gradient(90deg,#0b304133,transparent)}
+.modal-box button.action{transition:background .15s,box-shadow .15s}.modal-box button.action:hover:not(:disabled){box-shadow:0 0 12px #35cce777}
+@media(max-width:600px){.quest{display:none}.right-hud{transform:scale(.68)}.identity{transform:scale(.72)}.bottom{width:100%;padding:0 4px}.hotbar{width:max-content;margin:auto}.hot{width:45px}nav{gap:3px}nav button{padding:5px 4px;font-size:8px}#bossbar{top:155px;width:min(280px,80vw)}#notice{top:25%;width:85%;font-size:13px}.start-top,.start-bottom{font-size:8px;letter-spacing:1px}.start-window{max-height:54vh;overflow:auto}.window-body{padding:12px}.window-body p{font-size:15px}.window-body button{padding:8px 18px}}
+@media(max-height:560px){.start-mark,.start-kicker,.start-hint{display:none}.start-window{margin-top:10px}.start-content h1{font-size:38px}.window-body p{margin:7px 0}.window-body button{padding:7px 14px}.quest{display:none}}

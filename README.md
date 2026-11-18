@@ -1,6 +1,6 @@
 # Shadow Protocol
 
-Action RPG top-down para navegador, inspirado em Solo Leveling. Abra `index.html` diretamente ou execute `python3 -m http.server 8000` e acesse a página servida. Não há dependências de execução; sprites, cenário e efeitos sonoros são gerados no navegador.
+Action RPG top-down para navegador, inspirado em Solo Leveling. Abra `index.html` diretamente ou execute `python3 -m http.server 8000` e acesse a página servida. Não há dependências externas de execução; sprites, tiles de cenário e efeitos sonoros são gerados no navegador. A tela inicial usa uma ilustração local em `assets/title-background.png`.
 
 ## Controles
 
