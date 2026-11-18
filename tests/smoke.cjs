@@ -18,6 +18,8 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('game.js','utf8'), sandbox);
 const run = code => vm.runInContext(code, sandbox);
 run('game.start(null)');
+const HERO_POSES_COUNT = run('HERO_POSES.length');
+assert.equal(HERO_POSES_COUNT, 37);
 assert.doesNotThrow(() => run('game.draw()'), 'hub renders');
 for (let i = 0; i < 30; i++) {
   run("game.enter('E')");
@@ -38,7 +40,7 @@ run("game.player.x=300;game.player.y=600;game.player.cool=0;game.player.mp=125;g
 assert.equal(run('game.pendingStrikes.length'), 4);
 assert.equal(run('game.player.mp'), 100);
 // Each facing and pose is pre-cached; walking advances even without combat.
-assert.equal(run('Object.keys(game.sprites.playerFrames).length'), 8 * 25);
+assert.equal(run('Object.keys(game.sprites.playerFrames).length'), 8 * HERO_POSES_COUNT);
 run("game.animation=new PlayerAnimation(game.sprites);game.player.moving=true;game.player.moveAngle=Math.PI;game.animation.update(.15,game.player)");
 assert.equal(run('game.animation.direction(game.animation.moveAngle)'), 4);
 assert.equal(run('game.animation.frame(game.player)===game.sprites.playerFrames["4:walk1"]'), true);
@@ -95,7 +97,7 @@ const hp0 = run('game.player.hp');run('for(let i=0;i<60;i++)game.updateCombatFX(
 assert.ok(run('game.player.hp') < hp0, 'super damages the player');
 // --- v2: city + dynamic gates --------------------------------------------------------------
 run('game.player.hp=game.player.maxhp;game.returnHub()');
-assert.equal(run('game.world.w'), 4200, 'hub is now a full city');
+assert.equal(run('game.world.w'), 7600, 'hub is now a full city');
 assert.ok(run('game.world.blocked(HUB.ox+900,HUB.oy+150)'), 'association building is solid');
 assert.ok(!run('game.world.blocked(HUB.spawn.x,HUB.spawn.y)'), 'spawn point is free');
 run('game.gates=new GateSystem();for(let i=0;i<40;i++)game.gates.update(1,game)');
@@ -114,4 +116,18 @@ run('HudManager.toggle("minimap")');
 assert.equal(run('JSON.parse(localStorage.getItem("shadow-protocol-hud")).minimap'), true);
 run('HudManager.toggle("minimap")');
 assert.equal(run('JSON.parse(localStorage.getItem("shadow-protocol-hud")).minimap'), false);
-console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD and save.');
+// --- v3: traffic, NPCs and VFX -----------------------------------------------------------
+run('game.returnHub()');
+assert.ok(run('game.world.traffic.cars.length>30&&game.world.traffic.parked.length>10'), 'city has moving and parked cars');
+assert.ok(run('(()=>{const p=game.world.traffic.parked[0];return game.world.blocked(p.x,p.y,10)})()'), 'parked cars are solid');
+assert.ok(run('(()=>{const T=game.world.traffic,c=T.cars[0],q=T.pos(c);return game.world.blocked(q.x,q.y,10)})()'), 'moving cars are solid');
+run(`(()=>{const T=game.world.traffic;globalThis.__car=T.cars.find(c=>c.lane.axis==='h');__car.v=__car.vmax;const q=T.pos(__car);game.player.x=q.x+__car.lane.dir*(__car.len/2+70);game.player.y=q.y;for(let i=0;i<90;i++){game.time+=1/30;T.update(1/30,game)}})()`);
+assert.ok(run('Math.abs(game.player.x-game.world.traffic.pos(__car).x)>__car.len/2+8&&__car.v<1'), 'cars brake in front of the player');
+assert.ok(run('game.world.npcs.graph.nodes.length>100&&game.world.npcs.list.length>150'), 'pedestrian graph and NPC crowd exist');
+assert.ok(run('game.world.npcs.list.some(a=>a.kind==="hunter")&&game.world.npcs.list.filter(a=>a.post).length===2'), 'hunters and association door guards exist');
+run('game.player.x=HUB.spawn.x;game.player.y=HUB.spawn.y;game.gates.list=[];game.gates.spawn(game,{x:HUB.ox+900,y:HUB.oy+1000,instant:true,rank:"E",silent:true});for(let i=0;i<300;i++){game.time+=1/30;game.world.update(1/30)}');
+assert.ok(run('game.world.npcs.list.some(a=>a.state==="patrol"||a.state==="alert")'), 'hunters respond to gates');
+assert.ok(run('game.world.npcs.list.every(a=>!game.world.blocked(a.x,a.y,3,true))'), 'NPCs stay out of buildings');
+run('game.animation.effect("authority",game.player);game.animation.effect("summon",game.player);game.animation.effect("vital",game.player);game.animation.effect("mutilation",game.player,0,2)');
+assert.doesNotThrow(() => run('game.update(.016);game.draw()'), 'Shadow Monarch VFX render');
+console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs and VFX.');
