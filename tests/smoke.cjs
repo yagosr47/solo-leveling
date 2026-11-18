@@ -17,10 +17,12 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('game.js','utf8'), sandbox);
 const run = code => vm.runInContext(code, sandbox);
 run('game.start(null)');
+assert.doesNotThrow(() => run('game.draw()'), 'hub renders');
 for (let i = 0; i < 30; i++) {
   run("game.enter('E')");
   assert.equal(run('game.world.rooms.length'), 9);
   assert.equal(run('game.world.corridors.length'), 8);
+  assert.doesNotThrow(() => run('game.draw()'), 'dungeon renders');
   // Every generated room must be reachable from the entrance via corridors.
   assert.equal(run(`(()=>{const w=game.world, reached=new Set([3]);let changed=true;while(changed){changed=false;for(let i=0;i<w.rooms.length;i++){if(!reached.has(i))continue;for(let j=0;j<w.rooms.length;j++){if(reached.has(j))continue;const a=w.rooms[i],b=w.rooms[j];if(w.corridors.some(c=>a.cx>=c.x&&a.cx<=c.x+c.w&&a.cy>=c.y&&a.cy<=c.y+c.h&&b.cx>=c.x&&b.cx<=c.x+c.w&&b.cy>=c.y&&b.cy<=c.y+c.h)){reached.add(j);changed=true}}}}return reached.size})()`),9);
 }
