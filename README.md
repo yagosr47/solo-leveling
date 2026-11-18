@@ -11,3 +11,11 @@ Action RPG top-down para navegador, inspirado em Solo Leveling. Abra `index.html
 - C / Tab: status; I: inventário; V: sombras; B: loja; Esc: pausa
 
 No hub, aproxime-se dos portais e pressione E para escolher uma dungeon. Derrote o chefe, abra o baú e use o portal para retornar. O progresso é salvo no armazenamento local do navegador.
+
+As dungeons são geradas com salas conectadas e corredores; o minimapa revela as salas próximas. As sombras podem entrar em regeneração e consomem mana para retornar. A missão de treinamento é renovada por data local.
+
+## Verificação
+
+Execute `node --check game.js` e `node tests/smoke.cjs` para verificar sintaxe, conectividade das salas, colisão, habilidades, regeneração e salvamento. Os testes de simulação não substituem testes visuais no navegador.
+
+Este projeto ainda é um protótipo: não implementa todas as animações, tipos de inimigos, ataques de chefes e efeitos descritos na especificação original. Salvar registra a progressão, não o estado de uma dungeon em andamento; ao continuar, o jogador retorna ao hub.
