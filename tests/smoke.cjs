@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const noop = () => {};
-const context2d = new Proxy({}, {get: (target, key) => target[key] || (key === 'createPattern' ? () => ({}) : noop), set: (target, key, value) => (target[key] = value, true)});
+const gradient = {addColorStop: noop};
+const context2d = new Proxy({}, {get: (target, key) => target[key] || (key === 'createPattern' ? () => ({}) : typeof key === 'string' && key.endsWith('Gradient') ? () => gradient : key === 'measureText' ? () => ({width: 40}) : noop), set: (target, key, value) => (target[key] = value, true)});
 const elements = new Map();
 function element(id) {
   if (!elements.has(id)) elements.set(id, {width: 0, height: 0, style: {}, dataset: {}, classList: {add: noop, remove: noop, toggle: noop}, getContext: () => context2d, addEventListener: noop, innerHTML: '', textContent: ''});
@@ -37,7 +38,7 @@ run("game.player.x=300;game.player.y=600;game.player.cool=0;game.player.mp=125;g
 assert.equal(run('game.pendingStrikes.length'), 4);
 assert.equal(run('game.player.mp'), 100);
 // Each facing and pose is pre-cached; walking advances even without combat.
-assert.equal(run('Object.keys(game.sprites.playerFrames).length'), 8 * 13);
+assert.equal(run('Object.keys(game.sprites.playerFrames).length'), 8 * 25);
 run("game.animation=new PlayerAnimation(game.sprites);game.player.moving=true;game.player.moveAngle=Math.PI;game.animation.update(.15,game.player)");
 assert.equal(run('game.animation.direction(game.animation.moveAngle)'), 4);
 assert.equal(run('game.animation.frame(game.player)===game.sprites.playerFrames["4:walk1"]'), true);
@@ -70,4 +71,47 @@ assert.equal(run('game.soldiers[0].state'), 'FOLLOW');
 assert.equal(run('game.player.mp'), 5);
 run('SaveSystem.save(game)');
 assert.equal(run('SaveSystem.load().army[0].name'), 'Teste');
-console.log('Smoke tests passed: dungeon, combat, animation, shadow regeneration and save.');
+
+// --- v2: facing regression (bug: side walk looked like walking backwards) -------------------
+// Eyes must sit on the leading side of the head and the back view must not show the face.
+const facing = run(`(()=>{const out={};for(const d of [0,2,4,6]){const g=makeHeroFrame(d,'walk1'),eyes=[],hair=[];for(let y=0;y<g.h;y++)for(let x=0;x<g.w;x++){const c=g.px[y*g.w+x];if(c===HERO.eye)eyes.push(x);if(c===HERO.hair||c===HERO.hairL)hair.push(x)}const avg=a=>a.reduce((s,v)=>s+v,0)/(a.length||1);out[d]={eyes:eyes.length,eyeX:avg(eyes),hairX:avg(hair)}}return out})()`);
+assert.ok(facing[0].eyes > 0 && facing[0].eyeX > facing[0].hairX + 2, 'east profile looks to the right');
+assert.ok(facing[4].eyes > 0 && facing[4].eyeX < facing[4].hairX - 2, 'west profile looks to the left');
+assert.ok(facing[2].eyes >= 2, 'south view shows both eyes');
+assert.equal(facing[6].eyes, 0, 'north view shows the back of the head');
+run("game.animation=new PlayerAnimation(game.sprites);game.player.moving=true;game.player.moveAngle=0;game.animation.update(.1,game.player)");
+assert.equal(run('game.animation.frame(game.player)===game.sprites.playerFrames["0:walk1"]'), true, 'moving right uses the east-facing walk');
+// --- v2: no post-dash transparency ---------------------------------------------------------
+assert.ok(!/stealth>0\)ctx\.globalAlpha/.test(fs.readFileSync('game.js','utf8')), 'dash no longer fades the hero');
+// --- v2: monster attributes ----------------------------------------------------------------
+run('game.enter("C")');
+assert.ok(run('game.enemies.filter(e=>!e.boss).every(e=>e.attacks.length===2&&e.attacks.every(a=>a.kind!=="super"))'), 'regular monsters have attacks 1 and 2 only');
+assert.ok(run('(()=>{const b=game.enemies.find(e=>e.boss);return b.attacks.length===3&&b.attacks[2].kind==="super"})()'), 'bosses own the Super attack 3');
+assert.ok(run('MONSTER_TYPES.bear.attacks[0].range>MONSTER_TYPES.goblin.attacks[0].range&&MONSTER_TYPES.goblin.attacks[0].range>43'), 'reach grows with size and beats the old 43px');
+assert.ok(run('Object.values(MONSTER_TYPES).every(t=>t.hp&&t.speed&&t.radius)'), 'every type defines HP, speed and size');
+run('(()=>{const b=game.enemies.find(e=>e.boss);game.player.x=b.x-150;game.player.y=b.y;game.player.invuln=0;b.state="windup";b.current=b.attacks[2];b.stateT=0;b.update(.016,game)})()');
+assert.ok(run('game.hazards.some(h=>h.kind==="nova")'), 'boss super spawns its pattern');
+const hp0 = run('game.player.hp');run('for(let i=0;i<60;i++)game.updateCombatFX(.03)');
+assert.ok(run('game.player.hp') < hp0, 'super damages the player');
+// --- v2: city + dynamic gates --------------------------------------------------------------
+run('game.player.hp=game.player.maxhp;game.returnHub()');
+assert.equal(run('game.world.w'), 4200, 'hub is now a full city');
+assert.ok(run('game.world.blocked(HUB.ox+900,HUB.oy+150)'), 'association building is solid');
+assert.ok(!run('game.world.blocked(HUB.spawn.x,HUB.spawn.y)'), 'spawn point is free');
+run('game.gates=new GateSystem();for(let i=0;i<40;i++)game.gates.update(1,game)');
+assert.ok(run('game.gates.list.length') >= 1, 'gates spawn over time');
+assert.ok(run('game.gates.list.every(g=>!game.world.blocked(g.x,g.y,40))'), 'gates spawn in open areas');
+assert.ok(run('new Set(game.gates.list.map(g=>g.x+","+g.y)).size===game.gates.list.length'), 'gates use distinct positions');
+run('game.gates.list.forEach(g=>g.life=.5);game.gates.timer=99;game.gates.update(1,game)');
+assert.equal(run('game.gates.list.length'), 0, 'gates collapse when their timer ends');
+run('const g=game.gates.spawn(game,{x:HUB.spawn.x+40,y:HUB.spawn.y,instant:true,rank:"E",red:true});game.interact()');
+assert.equal(run('game.panel'), 'gate');
+assert.equal(run('game.selectedGate.red'), true);
+run('UIManager.close()');
+assert.doesNotThrow(() => run('game.update(.016);game.draw()'), 'city with gates renders');
+// --- v2: HUD minimise state persists ------------------------------------------------------
+run('HudManager.toggle("minimap")');
+assert.equal(run('JSON.parse(localStorage.getItem("shadow-protocol-hud")).minimap'), true);
+run('HudManager.toggle("minimap")');
+assert.equal(run('JSON.parse(localStorage.getItem("shadow-protocol-hud")).minimap'), false);
+console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD and save.');

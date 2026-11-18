@@ -65,3 +65,51 @@ h1 em{color:#a8efff}
 .modal-box button.action{transition:background .15s,box-shadow .15s}.modal-box button.action:hover:not(:disabled){box-shadow:0 0 12px #35cce777}
 @media(max-width:600px){.quest{display:none}.right-hud{transform:scale(.68)}.identity{transform:scale(.72)}.bottom{width:100%;padding:0 4px}.hotbar{width:max-content;margin:auto}.hot{width:45px}nav{gap:3px}nav button{padding:5px 4px;font-size:8px}#bossbar{top:155px;width:min(280px,80vw)}#notice{top:25%;width:85%;font-size:13px}.start-top,.start-bottom{font-size:8px;letter-spacing:1px}.start-window{max-height:54vh;overflow:auto}.window-body{padding:12px}.window-body p{font-size:15px}.window-body button{padding:8px 18px}}
 @media(max-height:560px){.start-mark,.start-kicker,.start-hint{display:none}.start-window{margin-top:10px}.start-content h1{font-size:38px}.window-body p{margin:7px 0}.window-body button{padding:7px 14px}.quest{display:none}}
+
+/* ---------------------------------------------------------------------------------------------
+   Minimisable HUD, gate tracker, bestiary and boss skill callout (v2).
+   Every panel with [data-hud] can be collapsed with its [−]/[+] button; H hides everything. */
+.hud-toggle{pointer-events:auto;width:18px;height:18px;padding:0;line-height:15px;font:bold 13px 'Share Tech Mono',monospace;color:#9befff;background:#06202fcc;border:1px solid #3a8ea4;cursor:pointer;transition:background .15s,box-shadow .15s,color .15s}
+.hud-toggle:hover{background:#0f4a63;color:#fff;box-shadow:0 0 10px #39d8ff88}.hud-toggle:focus-visible{outline:2px solid #efffff;outline-offset:2px}
+.hud-toggle.inline{float:right;margin:-2px 0 0 6px}
+.identity>.hud-toggle{position:absolute;top:5px;right:5px;z-index:2}
+.identity,.location,.minimap,.quest,.gates,.help,.hotbar-wrap,.zone-label{pointer-events:auto}
+.panel-body{transition:opacity .15s}
+[data-hud].collapsed .panel-body,[data-hud].collapsed .help-body{display:none}
+.identity.collapsed{height:auto;padding:6px 30px 6px 10px}.identity.collapsed .portrait,.identity.collapsed .eyebrow,.identity.collapsed .class{display:none}.identity.collapsed .hunter{font-size:13px;line-height:18px}.identity.collapsed .meter{margin:2px 0}
+.location.collapsed,.minimap.collapsed{width:auto;min-width:150px;padding:8px 10px}
+.side-stack{position:absolute;right:26px;top:238px;width:233px;display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 360px)}
+.side-stack .quest{position:relative;right:auto;top:auto;width:auto}
+.quest.collapsed .quest-title,.gates.collapsed .quest-title{border-bottom:0}
+.gates .count{display:inline-block;min-width:18px;margin-left:6px;padding:0 4px;text-align:center;color:#06131d;background:#54e8ff;font:bold 10px 'Share Tech Mono',monospace;line-height:15px}
+.gate-list{padding:8px 10px;max-height:220px;overflow:auto;scrollbar-width:thin}
+.gate-row{display:grid;grid-template-columns:10px 1fr auto;grid-template-rows:auto auto;column-gap:7px;align-items:center;padding:6px 4px;border-bottom:1px solid #17394a}
+.gate-row i{grid-row:span 2;width:9px;height:9px;transform:rotate(45deg);background:#3bcfff;box-shadow:0 0 8px #3bcfff}
+.gate-row.red i{background:#ff4b57;box-shadow:0 0 8px #ff4b57}.gate-row b{font-size:12px;letter-spacing:1px}.gate-row.red b{color:#ff9aa3}
+.gate-row span{font:11px 'Share Tech Mono',monospace;color:#d8f6ff}.gate-row small{grid-column:2 / span 2;font:9px 'Share Tech Mono',monospace;color:#7fa6b4}
+.gate-row.unstable span{color:#ff8a8a;animation:blink .6s steps(2) infinite}.gate-empty{margin:4px 0;font:10px 'Share Tech Mono',monospace;color:#6f93a1}
+@keyframes blink{50%{opacity:.35}}
+.map-foot .blue{color:#54dfff}.map-foot .red{color:#ff6371}
+.help{position:relative}.help .hud-toggle{margin:-2px 8px 0 0;float:none;vertical-align:middle}.help-mini{display:none}.help.collapsed .help-mini{display:inline;color:#6f93a1;font-size:9px}
+.hotbar-wrap{position:relative;display:inline-block}.hotbar-wrap .hud-toggle.tab{position:absolute;top:-10px;right:-10px;z-index:2}
+.hotbar-wrap.collapsed{min-width:120px;min-height:22px;padding:4px 30px 4px 10px;background:#061421dd;border:1px solid #2d6171}.hotbar-wrap.collapsed:before{content:'HABILIDADES · MENUS';font:9px 'Share Tech Mono',monospace;letter-spacing:1px;color:#7fa6b4}
+.zone-label .hud-toggle{order:3;margin-left:6px}.zone-label.collapsed>span,.zone-label.collapsed>div{display:none}
+.hud-master{position:absolute;top:8px;left:50%;transform:translateX(-50%);pointer-events:auto;z-index:5;padding:3px 10px;font:9px 'Share Tech Mono',monospace;letter-spacing:1.5px;color:#9befff;background:#061a28cc;border:1px solid #2f7d92;opacity:.65;transition:opacity .15s}
+.hud-master:hover{opacity:1}
+#hud.clean>*:not(.hud-master):not(#notice):not(#interact):not(#bossbar){display:none!important}
+#bossskill{display:block;margin-top:5px;font-style:normal;text-align:center;color:#ffcf4a;letter-spacing:1px;text-shadow:0 0 8px #ff6a3a;min-height:12px}
+.gate-card{display:flex;gap:14px;align-items:center;padding:12px;margin-bottom:10px;border:1px solid #3bcfff;background:linear-gradient(90deg,#0a3a52aa,transparent)}
+.gate-card.red{border-color:#ff4b57;background:linear-gradient(90deg,#5a0f1caa,transparent)}
+.gate-card b{display:block;font-size:15px;letter-spacing:1px}.gate-card small{display:block;margin-top:4px;font:11px 'Share Tech Mono',monospace;color:#a8c7d1}
+.gate-rank{flex:none;width:52px;height:52px;display:grid;place-items:center;font:bold 28px Georgia,serif;color:#e8fbff;border:2px solid currentColor;transform:rotate(45deg)}
+.gate-rank{color:#3bcfff;text-shadow:0 0 12px #3bcfff}.gate-card.red .gate-rank{color:#ff4b57;text-shadow:0 0 12px #ff4b57}
+.modal-box button.action.wide{display:block;width:100%;margin:12px 0 0;padding:12px;font-weight:bold;letter-spacing:2px}
+.beast{margin:8px 0;padding:10px;border:1px solid #1d4b5f;background:#06202f88}.beast.boss{border-color:#7f3343;background:#2a0b1488}
+.beast-head{display:flex;justify-content:space-between;font-size:14px}.beast-head span{font:10px 'Share Tech Mono',monospace;color:#7fa6b4}
+.beast-stats{display:flex;gap:14px;margin:6px 0;font:10px 'Share Tech Mono',monospace;color:#8fb3c0}.beast-stats b{color:#e8fbff}
+.atk-row{display:grid;grid-template-columns:48px 1fr;column-gap:8px;padding:3px 0;border-top:1px solid #12303f;font-size:12px}.atk-row b{font:10px 'Share Tech Mono',monospace;color:#54e8ff}.atk-row small{grid-column:2;font:9px 'Share Tech Mono',monospace;color:#7fa6b4}
+.atk-row.super b,.atk-row.super span{color:#ffcf4a;text-shadow:0 0 6px #ff6a3a}
+@media(max-height:700px){.side-stack{top:195px}}
+@media(max-width:750px){.side-stack{right:10px;top:170px;transform:scale(.8);transform-origin:top right}}
+@media(max-width:600px){.side-stack{display:none}.hud-master{top:auto;bottom:4px}}
+.gates .count{float:none}
