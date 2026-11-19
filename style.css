@@ -113,3 +113,106 @@ h1 em{color:#a8efff}
 @media(max-width:750px){.side-stack{right:10px;top:170px;transform:scale(.8);transform-origin:top right}}
 @media(max-width:600px){.side-stack{display:none}.hud-master{top:auto;bottom:4px}}
 .gates .count{float:none}
+
+/* ---------------------------------------------------------------------------------------------
+   Mobile / touch (v5): fullscreen-friendly page, floating analog stick, action cluster, compact
+   HUD, bigger tap targets, safe-area insets, rotate prompt and a settings menu.
+   --------------------------------------------------------------------------------------------- */
+html,body{overscroll-behavior:none}
+body{position:fixed;inset:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+#game{position:fixed;inset:0}
+#touch{z-index:1}#hud{z-index:2}#modal{z-index:10}#start{z-index:20}
+.modal-box input,.modal-box textarea{-webkit-user-select:text;user-select:text}
+/* settings menu (desktop and touch) */
+.menu-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;margin-bottom:6px}
+.modal-box button.action.big{margin:0;padding:12px 8px;font-weight:bold;letter-spacing:1px}
+.set-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;padding:7px 0;border-bottom:1px solid #1a4558}
+.set-row>span{font-size:13px;color:#d8f6ff}.set-row small{display:block;font:9px 'Share Tech Mono',monospace;color:#6f93a1;letter-spacing:.5px}
+.set-row>div{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}.set-row button.action{margin:0}
+.modal-box button.action.opt.on{background:linear-gradient(#1f7f9e,#0f4a63);border-color:#9af6ff;color:#fff;box-shadow:0 0 10px #35cce777}
+
+#touch{position:absolute;inset:0;pointer-events:none;--s:var(--ctl,1)}
+#stickZone{position:absolute;left:0;top:0;bottom:0;width:50%;pointer-events:auto;touch-action:none}
+#stickBase{position:fixed;left:calc(92px*var(--s) + env(safe-area-inset-left));top:calc(100% - 96px*var(--s) - env(safe-area-inset-bottom));width:calc(124px*var(--s));height:calc(124px*var(--s));margin:calc(-62px*var(--s)) 0 0 calc(-62px*var(--s));border-radius:50%;
+ background:radial-gradient(circle,#0b2a3c55 0 45%,#0a3a5288 46%,#06202f66 70%,transparent 71%);border:2px solid #3fbcd977;box-shadow:0 0 18px #00b7ff33,inset 0 0 22px #00b7ff22;opacity:calc(var(--ctl-alpha,.9)*.45);transition:opacity .15s}
+#stickBase.active{opacity:var(--ctl-alpha,.9);border-color:#7cecff}
+#stickBase .stick-ring{position:absolute;inset:18%;border-radius:50%;border:1px dashed #48e6ff44}
+#stickKnob{position:absolute;left:50%;top:50%;width:calc(54px*var(--s));height:calc(54px*var(--s));margin:calc(-27px*var(--s)) 0 0 calc(-27px*var(--s));border-radius:50%;background:radial-gradient(circle at 40% 35%,#9ff4ff,#2aa9d6 45%,#0b4d6c 75%);border:2px solid #c9fbff;box-shadow:0 0 16px #22c9ffaa}
+.t-top{position:absolute;top:calc(6px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;pointer-events:auto;z-index:3}
+.t-loc{max-width:32vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 10px;font:10px 'Share Tech Mono',monospace;letter-spacing:1px;color:#bff6ff;background:#061a28cc;border:1px solid #2d6f86}
+.t-icon{width:36px;height:36px;padding:0;font:16px/34px 'Share Tech Mono',monospace;color:#9befff;background:#061a28dd;border:1px solid #3a8ea4;box-shadow:0 0 8px #00a8d433;touch-action:manipulation}
+.t-icon svg{display:block;margin:auto}.t-icon:active,.t-icon.down{background:#0f4a63;color:#fff}
+#actions{position:absolute;right:calc(10px + env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));width:calc(246px*var(--s));height:calc(212px*var(--s));pointer-events:none;opacity:var(--ctl-alpha,.9)}
+.t-btn{--z:52;--r:0;--b:0;position:absolute;right:calc(var(--r)*1px*var(--s));bottom:calc(var(--b)*1px*var(--s));width:calc(var(--z)*1px*var(--s));height:calc(var(--z)*1px*var(--s));padding:0;border-radius:50%;pointer-events:auto;touch-action:none;color:#bff6ff;
+ background:radial-gradient(circle at 50% 35%,#15506aee,#071726ee 72%);border:2px solid #3b92a7;box-shadow:0 0 12px #00a8d44d,inset 0 0 12px #00c8ff2a;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:transform .06s,filter .15s}
+.t-btn .ico{display:block;width:58%;height:58%;font:bold calc(22px*var(--s))/1 'Share Tech Mono',monospace;color:#bff6ff;text-shadow:0 0 8px #33d6ff}
+.t-btn .ico svg{display:block;width:100%;height:100%;filter:drop-shadow(0 0 4px #34c5ff99)}
+.t-btn small{font:bold calc(8px*var(--s)) 'Share Tech Mono',monospace;letter-spacing:.5px;color:#a8e9f7;margin-top:1px}
+.t-btn em{position:absolute;bottom:calc(-5px*var(--s));left:0;right:0;margin:0 auto;width:max-content;min-width:18px;padding:0 4px;font:bold calc(9px*var(--s))/14px 'Share Tech Mono',monospace;font-style:normal;color:#e6fbff;background:#061822;border:1px solid #367084;border-radius:7px;white-space:nowrap}
+.t-btn .cd{position:absolute;inset:-2px;border-radius:50%;pointer-events:none;background:conic-gradient(#020a12c8 calc(var(--cd,0)*360deg),transparent 0)}
+.t-btn.down{transform:scale(.9);filter:brightness(1.45);border-color:#c9fbff}
+.t-btn.off{filter:grayscale(.75) brightness(.6)}
+.t-btn.atk{--z:84;--r:8;--b:8;border-width:3px;border-color:#57dfff;box-shadow:0 0 18px #00c3ff66,inset 0 0 18px #00d0ff44}
+.t-btn.atk .ico{width:50%;height:50%}
+.t-btn.dash{--z:58;--r:186;--b:11}.t-btn.dash .ico{height:auto;font-size:calc(24px*var(--s))}
+.t-btn.s1{--z:52;--r:123;--b:38}.t-btn.s2{--z:52;--r:88;--b:101}.t-btn.s3{--z:52;--r:21;--b:124}
+.t-btn.summon{--z:48;--r:121;--b:161;border-color:#9b5bff;background:radial-gradient(circle at 50% 35%,#3a1a66ee,#120726ee 72%);box-shadow:0 0 12px #8a3cff55}
+.t-btn.summon.active{border-color:#e0b8ff;box-shadow:0 0 18px #b06bffcc,inset 0 0 14px #b06bff66;animation:summonPulse 1.6s ease-in-out infinite}
+.t-btn.pot{--z:42}.t-btn.hp{--r:193;--b:89;border-color:#e2536a;background:radial-gradient(circle at 50% 35%,#5a1a2aee,#1a0710ee 72%)}.t-btn.mp{--r:193;--b:139;border-color:#36b6ef;background:radial-gradient(circle at 50% 35%,#103e5aee,#06172aee 72%)}
+@keyframes summonPulse{50%{box-shadow:0 0 26px #c78bffee,inset 0 0 18px #b06bff88}}
+/* left-handed: analog on the right, actions mirrored on the left (labels stay readable) */
+body.lefty #stickZone{left:auto;right:0}
+body.lefty #stickBase{left:calc(100% - 92px*var(--s) - env(safe-area-inset-right))}
+body.lefty #actions{right:auto;left:calc(10px + env(safe-area-inset-left));transform:scaleX(-1)}
+body.lefty #actions .t-btn>*{transform:scaleX(-1)}
+
+/* compact HUD on touch devices */
+body.touch .bottom,body.touch .location,body.touch .zone-label,body.touch .hud-master,body.touch .map-foot{display:none!important}
+body.touch header{align-items:flex-start;padding:calc(6px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) 0 calc(8px + env(safe-area-inset-left))}
+body.touch .identity{transform:none;width:222px;height:auto;padding:6px 34px 6px 9px;gap:0}
+body.touch .identity .portrait,body.touch .identity .eyebrow{display:none}
+body.touch .hunter{display:flex;align-items:center;justify-content:space-between;font-size:12px;letter-spacing:.6px;line-height:18px;white-space:nowrap}body.touch .hunter span{font-size:8px;padding:0 3px}body.touch .hunter span{float:none;margin:0 0 0 6px}
+body.touch .class{display:flex;justify-content:space-between;font-size:9px;margin:0 0 2px}body.touch .class b{float:none}body.touch .quest{display:block}body.touch .meter{margin:2px 0;font-size:9px}body.touch .meter span{min-width:52px}
+body.touch .hud-toggle{width:26px;height:26px;line-height:23px;font-size:16px}
+body.touch .identity>.hud-toggle{top:4px;right:4px}
+body.touch .right-hud{transform:none;gap:6px}
+body.touch .minimap{width:auto;padding:5px 6px}body.touch .map-head{font-size:8px;line-height:26px}
+body.touch .minimap canvas{width:128px;height:90px;margin:3px 0 0}
+body.touch .minimap.collapsed{min-width:0;padding:4px 6px}
+body.touch .side-stack{display:flex;left:calc(8px + env(safe-area-inset-left));right:auto;top:calc(86px + env(safe-area-inset-top));width:206px;transform:none;max-height:calc(100% - 210px);overflow:auto;gap:6px}
+body.touch.lefty .side-stack{left:auto;right:calc(8px + env(safe-area-inset-right));top:calc(150px + env(safe-area-inset-top))}
+body.touch .quest-title{padding:5px 8px;font-size:11px;line-height:26px}
+body.touch .quest-content{padding:8px 10px}body.touch .quest-content p{margin-bottom:8px}
+body.touch .gate-list{max-height:none}
+body.touch .quest{backdrop-filter:none}
+body.touch #notice{top:20%;max-width:72vw;font-size:12px;letter-spacing:1px;padding:6px 18px}
+body.touch #interact{top:auto;bottom:calc(12px + env(safe-area-inset-bottom));pointer-events:auto;touch-action:manipulation;padding:12px 20px;min-height:44px;font-size:13px;font-weight:bold;max-width:44vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.touch #bossbar{top:calc(48px + env(safe-area-inset-top));width:min(300px,46vw)}
+body.touch .modal-box{width:min(640px,94vw);max-height:calc(100% - 16px);padding:0 14px 14px}
+body.touch .modal-title{margin:0 -14px 12px;padding:8px 12px;font-size:15px}
+body.touch .modal-title button{width:38px;height:34px;margin:-6px -6px 0 0;font-size:24px}
+body.touch .modal-box button.action{min-height:40px;padding:8px 12px}
+body.touch .modal-box h2{font-size:14px;margin:12px 0 4px}
+body.touch #hud.clean .side-stack{display:none!important}
+/* light quality: cheaper compositing on weak GPUs */
+body.lite .vignette:after{display:none}body.lite .panel{box-shadow:0 2px 8px #0008}body.lite .quest,body.lite .start-window{backdrop-filter:none}
+/* short landscape phones */
+@media (max-height:420px){body.touch .side-stack{max-height:calc(100% - 190px)}body.touch .identity{width:200px}body.touch .minimap canvas{width:112px;height:78px}}
+/* portrait (only when the player chose to keep playing vertically) */
+@media (orientation:portrait){
+ #touch{--s:calc(var(--ctl,1)*.9)}
+ body.touch .t-loc{display:none}
+ body.touch .t-top{left:auto;right:calc(8px + env(safe-area-inset-right));transform:none;top:calc(120px + env(safe-area-inset-top))}
+ body.touch .identity{width:190px}
+ body.touch .minimap canvas{width:96px;height:68px}
+ body.touch .side-stack{top:calc(80px + env(safe-area-inset-top));width:180px;max-height:calc(100% - 330px)}
+ body.touch #interact{bottom:calc(240px + env(safe-area-inset-bottom));max-width:80vw}
+}
+#rotate{display:none;position:fixed;inset:0;z-index:30;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%,#0b2840f2,#020711fa 70%);text-align:center}
+@media (orientation:portrait){body.touch:not(.allow-portrait) #rotate{display:flex}}
+.rotate-box{padding:24px;color:#d8f6ff}.rotate-box b{display:block;margin-top:22px;font-size:18px;letter-spacing:3px;color:#9befff;text-shadow:0 0 12px #00cfff}
+.rotate-box p{color:#89a6b1;font-size:13px}.rotate-box button{margin-top:10px;padding:10px 18px;background:#0c3d53;border:1px solid #62eaff;color:#d9fbff;letter-spacing:2px}
+.rotate-phone{width:44px;height:76px;margin:auto;border:3px solid #62eaff;border-radius:8px;box-shadow:0 0 18px #00cfff66;animation:rotatePhone 2.2s ease-in-out infinite}
+@keyframes rotatePhone{0%,20%{transform:rotate(0)}55%,80%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
+body.touch .side-stack .quest,body.touch .side-stack .gates{transform:none;right:auto;top:auto;width:auto;position:relative}
+.menu-grid .action{white-space:nowrap}

@@ -104,7 +104,7 @@ run('game.gates=new GateSystem();for(let i=0;i<40;i++)game.gates.update(1,game)'
 assert.ok(run('game.gates.list.length') >= 1, 'gates spawn over time');
 assert.ok(run('game.gates.list.every(g=>!game.world.blocked(g.x,g.y,40))'), 'gates spawn in open areas');
 assert.ok(run('new Set(game.gates.list.map(g=>g.x+","+g.y)).size===game.gates.list.length'), 'gates use distinct positions');
-run('game.gates.list.forEach(g=>g.life=.5);game.gates.timer=99;game.gates.update(1,game)');
+run('game.gates.list.forEach(g=>{g.life=.5;g.forming=0});game.gates.timer=99;game.gates.update(1,game)');
 assert.equal(run('game.gates.list.length'), 0, 'gates collapse when their timer ends');
 run('const g=game.gates.spawn(game,{x:HUB.spawn.x+40,y:HUB.spawn.y,instant:true,rank:"E",red:true});game.interact()');
 assert.equal(run('game.panel'), 'gate');
@@ -190,4 +190,27 @@ run(`game.summoned=false;game.army=[{name:'O',type:'orc',level:3}];game.toggleAr
 assert.ok(run('game.soldiers[0].level>3&&game.soldiers[0].maxhp===Math.round((MONSTER_TYPES.orc.hp[0]+MONSTER_TYPES.orc.hp[1]*game.soldiers[0].level)*game.soldiers[0].power)'), 'shadows level up and their HP scales');
 assert.ok(/drawShadowHUD/.test(src) && /`LV \$\{a\.level\}/.test(src), 'mini-HUD shows LV and HP above every shadow');
 assert.doesNotThrow(() => run('for(let i=0;i<60;i++)game.update(1/60);game.draw()'), 'shadow army renders');
-console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro and shadow army.');
+// Mobile / touch: adaptive scale, analog stick, auto-aim attack and persisted settings.
+assert.ok(Math.abs(run('Mobile.scale(844,390)') - 390/460) < 1e-9, 'short landscape phone zooms the camera out');
+assert.equal(run('Mobile.scale(1366,768)'), 1, 'desktop keeps 1:1 scale');
+assert.equal(run('Mobile.scale(480,240)'), 0.62, 'scale never drops below the readable minimum');
+run("Mobile.set('zoom','0.7')");
+assert.equal(run('Mobile.scale(844,390)'), 0.7, 'manual zoom overrides auto scale');
+assert.equal(JSON.parse(store.get('shadow-protocol-settings')).zoom, 0.7, 'settings persist to localStorage');
+run("Mobile.set('zoom','auto');Mobile.set('lefty','true')");
+assert.equal(run('Settings.d.lefty'), true, 'boolean settings are parsed');
+assert.equal(run("(Settings.d.lefty=false,Settings.load(),Settings.d.lefty)"), true, 'settings reload from storage');
+run("Mobile.set('lefty','false')");
+run(`game.enter('E');game.enemies=[];game.panel=null;(()=>{const r=game.world.rooms[3];game.player.x=r.cx;game.player.y=r.cy;game.player.vx=game.player.vy=0;game.input.keys={};game.input.touchMode=true;game.input.stick={x:1,y:0,mag:1};globalThis.__x0=game.player.x})();for(let i=0;i<6;i++)game.update(1/60)`);
+assert.ok(run('game.player.x') > run('__x0') + 3, 'analog stick moves the hunter');
+run(`game.input.stick={x:0,y:-.3,mag:.3};globalThis.__y0=game.player.y;globalThis.__x1=game.player.x;for(let i=0;i<6;i++)game.update(1/60)`);
+assert.ok(run('game.player.y') < run('__y0'), 'light stick push walks');
+run(`game.input.stick={x:.1,y:0,mag:.1};game.player.vx=game.player.vy=0;globalThis.__p0={x:game.player.x,y:game.player.y};for(let i=0;i<6;i++)game.update(1/60)`);
+assert.ok(run('Math.hypot(game.player.x-__p0.x,game.player.y-__p0.y)') < 2, 'stick dead zone ignores tiny pushes');
+run(`game.input.stick={x:0,y:0,mag:0};(()=>{const p=game.player,e=new Enemy(p.x+60,p.y+40,'goblin',1);game.enemies=[e];globalThis.__e=e;e.hp=e.maxhp=1e6;game.input.touchAttack=true;p.cool=0})()`);
+assert.equal(run('game.aimTarget()===__e'), true, 'auto-aim picks the closest visible enemy');
+run('game.update(1/60)');
+assert.ok(Math.abs(run('game.player.angle') - Math.atan2(40, 60)) < 0.05, 'touch attack faces the auto-aim target');
+assert.ok(run('game.player.cool') > 0, 'holding the attack button swings the weapon');
+run('game.input.touchAttack=false;game.input.touchMode=false');
+console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army and mobile touch controls.');

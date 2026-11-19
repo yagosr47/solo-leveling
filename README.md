@@ -14,6 +14,29 @@ No hub, aproxime-se dos portais e pressione E para escolher uma dungeon. Derrote
 
 As dungeons são geradas com salas conectadas e corredores; o minimapa revela as salas próximas. As sombras podem entrar em regeneração e consomem mana para retornar. A missão de treinamento é renovada por data local.
 
+## Celular e tablet
+
+Em telas de toque, os controles aparecem sozinhos. Também dá para forçar ou desligar o modo de toque em **☰ → Menu do Sistema**.
+
+- **Analógico flutuante (lado esquerdo):** surge onde o dedo encosta. Um toque leve faz o herói andar e um toque firme faz correr. A esquiva segue a direção do analógico.
+- **Botões (lado direito):**
+  - ATAQUE: segure para atacar em sequência. A mira automática escolhe o inimigo visível mais próximo.
+  - ESQUIVA, as habilidades 1, 2 e 3 (mostram o custo de MP e se ficam indisponíveis), invocar sombras e poções de HP e MP.
+  - O aviso de interação ("▶ …") também pode ser tocado.
+- **Barra superior:** tela cheia, ocultar ou mostrar o HUD e o menu.
+- **Menu do Sistema (toque):**
+  - Atalhos para Status, Inventário, Sombras, Loja, Bestiário e Salvar.
+  - Tela cheia e tela cheia ao iniciar.
+  - Zoom da câmera (automático, 70–120%) e qualidade (automática, alta ou leve).
+  - Tamanho e opacidade dos botões, modo canhoto, vibração.
+  - Minimizar ou restaurar os painéis.
+- **Tamanho adaptativo:** a câmera se afasta em telas baixas (celular na horizontal), para mostrar mais do mapa sem deixar o desenho minúsculo. O HUD fica compacto: só a identidade, o minimapa e os painéis recolhíveis de missão e gates. A ajuda de teclado e a hotbar do desktop ficam ocultas.
+- **Desempenho:** se o jogo ficar abaixo de cerca de 38 FPS por alguns segundos, o modo leve é ativado automaticamente, com menos partículas e brilho.
+- **Tela cheia e PWA:** o jogo pede tela cheia ao começar, se essa opção estiver ligada. Ao usar "Adicionar à tela inicial", ele abre em tela cheia na horizontal (`manifest.webmanifest`).
+- **Orientação:** na vertical aparece um aviso para girar o aparelho. Também é possível escolher "Jogar na vertical".
+
+O layout de desktop (teclado e mouse) não mudou.
+
 ## Verificação
 
 Execute `node --check game.js` e `node tests/smoke.cjs` para verificar sintaxe, conectividade das salas, colisão, habilidades, regeneração e salvamento. Os testes de simulação não substituem testes visuais no navegador.
