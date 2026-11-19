@@ -2,7 +2,15 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#030a12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shadow Protocol">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <title>Solo Leveling — Shadow Protocol</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -10,6 +18,27 @@
 <div id="game">
  <canvas id="canvas"></canvas>
  <div class="vignette"></div>
+ <!-- Touch controls (phones/tablets): floating analog stick, action cluster and quick buttons.
+      Rendered under the HUD so HUD panels stay tappable; hidden on desktop. -->
+ <div id="touch" class="hidden">
+  <div id="stickZone" aria-label="Analógico de movimento"><div id="stickBase"><i class="stick-ring"></i><div id="stickKnob"></div></div></div>
+  <div class="t-top">
+   <span id="tLoc" class="t-loc">HUNTERS ASSOCIATION</span>
+   <button class="t-icon" data-t="fullscreen" id="tFull" type="button" aria-label="Tela cheia" title="Tela cheia"></button>
+   <button class="t-icon" data-t="hud" type="button" aria-label="Ocultar/mostrar HUD" title="Ocultar HUD">◐</button>
+   <button class="t-icon" data-t="menu" type="button" aria-label="Menu" title="Menu">☰</button>
+  </div>
+  <div id="actions">
+   <button class="t-btn atk" data-t="attack" type="button" aria-label="Atacar"><b class="ico"></b><small>ATAQUE</small></button>
+   <button class="t-btn dash" data-t="dash" type="button" aria-label="Esquivar"><b class="ico">»</b><small>ESQUIVA</small><i class="cd"></i></button>
+   <button class="t-btn sk s1" data-t="skill1" data-hot="0" type="button" aria-label="Corte Vital"><b class="ico"></b><em>15</em><i class="cd"></i></button>
+   <button class="t-btn sk s2" data-t="skill2" data-hot="1" type="button" aria-label="Mutilação"><b class="ico"></b><em>25</em><i class="cd"></i></button>
+   <button class="t-btn sk s3" data-t="skill3" data-hot="2" type="button" aria-label="Autoridade"><b class="ico"></b><em>35</em><i class="cd"></i></button>
+   <button class="t-btn summon" data-t="summon" data-hot="3" type="button" aria-label="Invocar sombras"><b class="ico"></b><em id="tArmy">0/2</em></button>
+   <button class="t-btn pot hp" data-t="hp" data-hot="4" type="button" aria-label="Poção de vida"><b class="ico"></b><em id="tHp">3</em></button>
+   <button class="t-btn pot mp" data-t="mp" data-hot="5" type="button" aria-label="Poção de mana"><b class="ico"></b><em id="tMp">3</em></button>
+  </div>
+ </div>
  <div id="hud" class="hidden">
   <button id="hudToggle" class="hud-master" type="button" title="Ocultar/mostrar toda a HUD (H)">◈ OCULTAR HUD [H]</button>
   <header>
@@ -59,6 +88,7 @@
   <div class="zone-label" data-hud="zone"><button class="hud-toggle inline" data-toggle="zone" type="button" aria-label="Minimizar zona" title="Minimizar">−</button><span>✦</span><div><small>VOCÊ ESTÁ EM</small><strong id="zoneLabel">ASSOCIAÇÃO DOS CAÇADORES</strong></div></div>
  </div>
  <div id="modal" class="hidden"></div>
+ <div id="rotate"><div class="rotate-box"><div class="rotate-phone"></div><b>GIRE O APARELHO</b><p>O jogo foi feito para a tela na horizontal.</p><button id="rotateSkip" type="button">JOGAR NA VERTICAL</button></div></div>
  <div id="start"><div class="start-top">◈ &nbsp; SYSTEM INTERFACE &nbsp; <span>VERSION 02.0</span></div><div class="start-content"><div class="start-mark">✦</div><div class="start-kicker">UM NOVO MUNDO AGUARDA</div><h1>SOLO <em>LEVELING</em></h1><div class="start-line"><span></span> SHADOW PROTOCOL <span></span></div><div class="start-window"><div class="window-title">◈ &nbsp; NOTIFICAÇÃO DO SISTEMA <span>×</span></div><div class="window-body"><div class="alert-icon">!</div><p>Você adquiriu as qualificações para<br>se tornar um <strong>Jogador.</strong></p><p class="question">Deseja aceitar?</p><button id="accept">[ &nbsp; ACEITAR &nbsp; ]</button><button id="continue" class="hidden">CONTINUAR JOGO</button></div></div><div class="start-hint">UMA JORNADA PARA SE TORNAR O MAIS FORTE</div></div><div class="start-bottom"><span>© SHADOW PROTOCOL</span><span>PRESS START TO BEGIN &nbsp; ◈</span></div></div>
 </div>
 <script type="module" src="game.js"></script>
