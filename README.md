@@ -12,6 +12,14 @@ Action RPG top-down para navegador, inspirado em Solo Leveling. Abra `index.html
 
 No hub, aproxime-se dos portais e pressione E para escolher uma dungeon. Derrote o chefe, abra o baú e use o portal para retornar. O progresso é salvo no armazenamento local do navegador.
 
+**Mana das sombras.** Invocar o exército (R) tem um custo inicial de MP, que é a base mais um valor por sombra. Enquanto as sombras estão em campo, cada uma consome MP por segundo.
+
+- Sombras maiores, de nível mais alto ou de chefes custam mais. INT reduz todos os custos.
+- Sombras caídas, em regeneração, não consomem mana.
+- O MP regenera 1,2/s naturalmente. Se o saldo for negativo e a mana acabar, o exército retorna sozinho.
+- O painel de identidade mostra as sombras ativas, o tempo invocado e o gasto em MP/s. O mesmo valor aparece na hotbar e no botão de toque.
+- O painel Sombras (V) detalha o custo de invocação, a manutenção, o saldo com a regeneração, o tempo ativo e o custo de cada sombra.
+
 As dungeons são geradas com salas conectadas e corredores; o minimapa revela as salas próximas. As sombras podem entrar em regeneração e consomem mana para retornar. A missão de treinamento é renovada por data local.
 
 ## Celular e tablet

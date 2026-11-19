@@ -66,7 +66,7 @@ run('game.player.dashCd=0;game.dash()');
 assert.equal(run('game.animation.action'), 'dash');
 run('game.animation.update(.02,game.player)');
 assert.equal(run('game.animation.effects.some(f=>f.type==="ghost")'), true);
-run("game.army=[{name:'Teste',kills:0}]; game.toggleArmy(); game.soldiers[0].hurt(9999,game)");
+run("game.army=[{name:'Teste',kills:0}]; game.player.mp=game.player.maxmp;game.toggleArmy(); game.soldiers[0].hurt(9999,game)");
 assert.equal(run('game.soldiers[0].state'), 'REGENERATE');
 run('game.player.mp=20; game.soldiers[0].update(4.1,game,0)');
 assert.equal(run('game.soldiers[0].state'), 'FOLLOW');
@@ -141,11 +141,11 @@ for (const rank of ['E','C','S']) for (let i = 0; i < 6; i++) {
 }
 // R next to a wall: every shadow must appear on a free spot reachable from the player (no wall in between).
 run(`game.enter('C');game.player.x=104;game.player.y=470;game.player.angle=Math.PI;game.summoned=false;
- game.army=Array.from({length:8},(_,i)=>({name:'S'+i,type:['orc','wolf','spider','bear'][i%4],level:5,kills:0}));game.toggleArmy()`);
+ game.army=Array.from({length:8},(_,i)=>({name:'S'+i,type:['orc','wolf','spider','bear'][i%4],level:5,kills:0}));game.player.mp=game.player.maxmp;game.toggleArmy()`);
 assert.equal(run('game.soldiers.length'), 8);
 assert.ok(run('game.soldiers.every(s=>game.isWalkable(s.x,s.y,Math.min(26,s.radius))&&game.pathClear(game.player.x,game.player.y,s.x,s.y,10))'), 'shadows spawn on free spots around the player');
 assert.ok(run('game.soldiers.every((s,i,a)=>a.every(o=>o===s||Math.hypot(o.x-s.x,o.y-s.y)>=20))'), 'shadows do not stack on one spot');
-run(`game.returnHub();const b=CITY.buildings[0];game.player.x=b.x+b.w/2;game.player.y=b.y+b.h+14;game.summoned=false;game.toggleArmy()`);
+run(`game.returnHub();const b=CITY.buildings[0];game.player.x=b.x+b.w/2;game.player.y=b.y+b.h+14;game.summoned=false;game.player.mp=game.player.maxmp;game.toggleArmy()`);
 assert.ok(run('game.soldiers.every(s=>!game.world.blocked(s.x,s.y,12,true))'), 'shadows never spawn inside city buildings');
 run('game.summoned=false;game.soldiers=[]');
 // --- v4: water and ambient effects anchored to the world ----------------------------------------
@@ -176,7 +176,7 @@ run(`game.enter('C');game.corpses=[];const e=game.enemies.find(e=>e.type==='orc'
 assert.equal(run('game.army.length'), 1, 'extraction succeeds');
 assert.equal(run('game.army[0].type'), run('__t'), 'shadow keeps the monster type');
 assert.equal(run('game.army[0].level'), 17, 'shadow keeps the monster level');
-run('game.toggleArmy()');
+run('game.player.mp=game.player.maxmp;game.toggleArmy()');
 assert.equal(run('game.soldiers[0].art'), run('MONSTER_TYPES[__t].art'), 'shadow uses the monster sprite');
 assert.equal(run('JSON.stringify(game.soldiers[0].attacks.map(a=>a.name+a.kind+a.range))'), run('JSON.stringify(MONSTER_TYPES[__t].attacks.map(a=>a.name+a.kind+a.range))'), 'shadow copies the monster attacks and reach');
 const pal = run(`(()=>{const g=buildMonsterGrid(MONSTER_ART[MONSTER_TYPES[__t].art],'idle0',1,true),ok=new Set([...SHADOW_RAMP,SHADOW_EYE,SHADOW_EYE_HALO,SHADOW_EDGE,SHADOW_METAL]);return {all:g.px.filter(Boolean).every(c=>ok.has(c)),eyes:g.px.filter(c=>c===SHADOW_EYE).length}})()`);
@@ -186,10 +186,33 @@ assert.equal(run('armyCap({stats:{INT:4},level:1})'), 3);
 assert.ok(run('armyCap({stats:{INT:4},level:21})>armyCap({stats:{INT:4},level:1})&&armyCap({stats:{INT:12},level:1})>armyCap({stats:{INT:4},level:1})'), 'capacity grows with level and INT');
 run(`game.army=Array.from({length:armyCap(game.player)},(_,i)=>({name:'x',type:'goblin',level:1}));game.corpses=[{x:game.player.x,y:game.player.y,life:5,tries:0,level:1,name:'G',type:'goblin'}];game.interact()`);
 assert.equal(run('game.army.length'), run('armyCap(game.player)'), 'extraction respects the slot cap');
-run(`game.summoned=false;game.army=[{name:'O',type:'orc',level:3}];game.toggleArmy();const s=game.soldiers[0];s.data.xp=0;s.gainXP({level:30,boss:false},game)`);
+run(`game.summoned=false;game.army=[{name:'O',type:'orc',level:3}];game.player.mp=game.player.maxmp;game.toggleArmy();const s=game.soldiers[0];s.data.xp=0;s.gainXP({level:30,boss:false},game)`);
 assert.ok(run('game.soldiers[0].level>3&&game.soldiers[0].maxhp===Math.round((MONSTER_TYPES.orc.hp[0]+MONSTER_TYPES.orc.hp[1]*game.soldiers[0].level)*game.soldiers[0].power)'), 'shadows level up and their HP scales');
 assert.ok(/drawShadowHUD/.test(src) && /`LV \$\{a\.level\}/.test(src), 'mini-HUD shows LV and HP above every shadow');
 assert.doesNotThrow(() => run('for(let i=0;i<60;i++)game.update(1/60);game.draw()'), 'shadow army renders');
+// Shadow army mana: summon cost, per-second upkeep while active, auto-recall when MP runs out.
+run(`game.returnHub();game.panel=null;game.player.stats.INT=5;game.army=[{name:'O',type:'orc',level:5,kills:0},{name:'W',type:'wolf',level:5,kills:0}];game.summoned=false;game.soldiers=[]`);
+const cost = run('armySummonCost(game.player,game.army)');
+assert.ok(cost > 0, 'summoning has a mana cost');
+run(`game.player.mp=${cost}-1;game.toggleArmy()`);
+assert.equal(run('game.summoned'), false, 'cannot summon without enough mana');
+run('game.player.mp=100;game.toggleArmy()');
+assert.equal(run('game.summoned'), true, 'summon succeeds with enough mana');
+assert.ok(Math.abs(run('game.player.mp') - (100 - cost)) < 1e-9, 'summon cost is deducted');
+const drain = run('game.armyDrain()');
+assert.ok(drain > 0 && Math.abs(drain - run('armyUpkeep(game.player,game.army)')) < 1e-9, 'active shadows drain mana per second');
+run('globalThis.__m0=game.player.mp;game.armyT=0;for(let i=0;i<60;i++)game.update(1/60)');
+assert.ok(Math.abs(run('game.player.mp') - (run('__m0') + run('MP_REGEN') - drain)) < 0.05, 'one second of upkeep costs the shown MP/s (net of regen)');
+assert.ok(Math.abs(run('game.armyT') - 1) < 1e-6, 'active time is tracked');
+run("game.soldiers[0].hurt(1e6,game)");
+assert.ok(run('game.armyDrain()') < drain, 'fallen (regenerating) shadows stop draining');
+assert.ok(run(`shadowMana({type:'igris',boss:true,level:5},game.player).upkeep>shadowMana({type:'orc',level:5},game.player).upkeep`), 'boss shadows cost more');
+assert.ok(run(`(()=>{const a=armyUpkeep(game.player,game.army);game.player.stats.INT=30;const b=armyUpkeep(game.player,game.army);game.player.stats.INT=5;return b<a})()`), 'INT reduces the upkeep');
+run(`game.summoned=false;game.army=Array.from({length:4},(_,i)=>({name:'S'+i,type:'orc',level:12,kills:0}));game.player.mp=game.player.maxmp;game.toggleArmy();game.player.mp=0.001;game.update(1/60)`);
+assert.equal(run('game.summoned'), false, 'army is recalled when mana runs out');
+assert.equal(run('game.soldiers.length'), 0);
+run('game.army=[];game.player.mp=game.player.maxmp;game.toggleArmy()');
+assert.equal(run('game.summoned'), false, 'empty army cannot be summoned');
 // Mobile / touch: adaptive scale, analog stick, auto-aim attack and persisted settings.
 assert.ok(Math.abs(run('Mobile.scale(844,390)') - 390/460) < 1e-9, 'short landscape phone zooms the camera out');
 assert.equal(run('Mobile.scale(1366,768)'), 1, 'desktop keeps 1:1 scale');
@@ -213,4 +236,4 @@ run('game.update(1/60)');
 assert.ok(Math.abs(run('game.player.angle') - Math.atan2(40, 60)) < 0.05, 'touch attack faces the auto-aim target');
 assert.ok(run('game.player.cool') > 0, 'holding the attack button swings the weapon');
 run('game.input.touchAttack=false;game.input.touchMode=false');
-console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army and mobile touch controls.');
+console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army, army mana and mobile touch controls.');
