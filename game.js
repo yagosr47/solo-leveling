@@ -236,14 +236,36 @@ const BOSS_ART={
  A:{base:'bear',k:1.75,over:{fur:'#dff4fa',belly:'#ffffff',eye:'#00e1ff',claw:'#2a90b8',crown:'#7fe8ff'}},
  S:{base:'demon',k:1.75,over:{body:'#1c0610',skin:'#5a0f1e',horns:'#f6d36b',wings:'#2a0812',eye:'#ffef7a',claw:'#ffd36b',weapon:'sword',bladeCol:'#ff9a5a',metal:'#f6d36b',blade:24}},
 };
-function makeMonsterFrame(art,pose,k=1){
+function buildMonsterGrid(art,pose,k=1,shadow=false){
  const g=new PixelGrid(Math.ceil(art.w*k),Math.ceil(art.h*k));
  if(art.rig==='q')drawQuadruped(g,pose,art,k);else if(art.rig==='s')drawSpider(g,pose,art,k);else drawHumanoid(g,pose,art,k);
  finishAuto(g,[art.eye,'#ffffff',art.bladeCol,art.orb,art.metal]);
- return {img:g.toCanvas(1),w:g.w,h:g.h,ax:g.w/2,ay:Math.round(art.gy*k)};
+ if(shadow)shadowize(g,art);
+ return g;
 }
+function makeMonsterFrame(art,pose,k=1,shadow=false){const g=buildMonsterGrid(art,pose,k,shadow);let top=0;while(top<g.h-1&&!g.px.slice(top*g.w,(top+1)*g.w).some(Boolean))top++;return {img:g.toCanvas(1),w:g.w,h:g.h,ax:g.w/2,ay:Math.round(art.gy*k),top}}
+// Shadow extraction look: the exact silhouette, pose set and proportions of the defeated monster,
+// re-inked with a purple/black luminance ramp. Eyes (and glowing orbs) burn ice-blue with a halo,
+// blades and metal turn violet, and the top edge gets a faint violet rim light.
+const SHADOW_RAMP=['#05020a','#0f0620','#1a0b33','#271149','#381a66','#4f2690','#6c3cc0'];
+const SHADOW_EYE='#8ff0ff',SHADOW_EYE_HALO='#2f86d6',SHADOW_EDGE='#9a62ff',SHADOW_METAL='#b98cff';
+function shadowize(g,art){const eyes=new Set([art.eye,'#ffffff',art.orb].filter(Boolean)),metal=new Set([art.bladeCol,art.metal].filter(Boolean)),map={},w=g.w,h=g.h,src=g.px.slice(),eyePx=[];
+ for(let i=0;i<src.length;i++){const c=src[i];if(!c)continue;if(eyes.has(c)){g.px[i]=SHADOW_EYE;eyePx.push(i);continue}if(metal.has(c)){g.px[i]=SHADOW_METAL;continue}
+  let m=map[c];if(!m){const v=hexRGB(c),L=(.3*(v>>16)+.59*(v>>8&255)+.11*(v&255))/255;m=map[c]=SHADOW_RAMP[Math.min(SHADOW_RAMP.length-2,Math.floor(Math.pow(L,.75)*(SHADOW_RAMP.length-1)))]}g.px[i]=m}
+ // rim light on upper edges (pixels right under transparent space, skipping the outline row)
+ for(let y=1;y<h;y++)for(let x=0;x<w;x++){const i=y*w+x,c=g.px[i];if(!c||c===SHADOW_EYE||c===SHADOW_RAMP[0])continue;const up=src[i-w];if(up&&y>1&&!src[i-2*w])g.px[i]=SHADOW_EDGE}
+ for(const i of eyePx){const x=i%w,y=(i/w)|0;for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=w||ny>=h)continue;const j=ny*w+nx;if(g.px[j]&&g.px[j]!==SHADOW_EYE)g.px[j]=SHADOW_EYE_HALO}}
+ // Arts without eyes (e.g. the legacy soldier) get two glowing pixels on the head.
+ if(!eyePx.length){let top=-1;for(let i=0;i<g.px.length&&top<0;i++)if(g.px[i])top=i;if(top>=0){const y=((top/w)|0)+Math.max(3,Math.round(h*.09)),x=top%w;for(const dx of [-2,2]){const j=y*w+x+dx;if(g.px[j])g.px[j]=SHADOW_EYE}}}
+ return g}
 // ---------------------------------------------------------------------------------------------
 // Deterministic PRNG (mulberry32) for procedural layouts and looks.
+// Stable 2D hash in [0,1): used to anchor procedural effects (water, motes) to world cells.
+const hash2=(a,b)=>{let h=Math.imul(a|0,374761393)+Math.imul(b|0,668265263)|0;h=Math.imul(h^h>>>13,1274126177);return ((h^h>>>16)>>>0)/4294967296};
+// Ring/spiral search for a free spot around (cx,cy). `ok(x,y)` decides; candidates fan out from
+// `angle` (alternating sides), ring by ring, from minR to maxR. Returns {x,y} or null.
+function spiralSearch(cx,cy,ok,{minR=0,maxR=240,rad=12,step=0,angle=0,flat=1}={}){if(minR<=0&&ok(cx,cy))return {x:cx,y:cy};const st=step||Math.max(14,rad*1.5);
+ for(let r=Math.max(st,minR);r<=maxR;r+=st){const n=Math.max(8,Math.floor(Math.PI*2*r/Math.max(10,rad*2)));for(let i=0;i<n;i++){const a=angle+(i%2?1:-1)*Math.ceil(i/2)*Math.PI*2/n,x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r*flat;if(ok(x,y))return {x,y}}}return null}
 const seeded=s=>()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return ((t^t>>>14)>>>0)/4294967296};
 // People rig (civilians and hunters). Same body-space projection as the hero, so every NPC has
 // 8 real facings, a 6-frame walk, a 6-frame run, idle breathing, talking gestures, a phone pose
@@ -415,8 +437,11 @@ class ProceduralSprites{
  beginFrame(){this.budget=2}
  warm(ms=4){const end=Date.now()+ms;while(this.queue.length&&Date.now()<end){const [look,dir,pose]=this.queue.shift(),key=look.id+'|'+dir+'|'+pose;if(!this.people.has(key))this.people.set(key,makePersonFrame(dir,pose,look).toCanvas(1))}}
  lazy(obj,key,build){Object.defineProperty(obj,key,{enumerable:true,configurable:true,get(){const v=build();Object.defineProperty(obj,key,{value:v,enumerable:true});return v}})}
- set(art,k){const o={};for(const p of MONSTER_POSES)this.lazy(o,p,()=>makeMonsterFrame(art,p,k));return o}
+ set(art,k,shadow=false){const o={};for(const p of MONSTER_POSES)this.lazy(o,p,()=>makeMonsterFrame(art,p,k,shadow));return o}
  monster(key,pose){return (this.monsters[key]||this.monsters.goblin)[pose]}
+ // Shadow-palette twin of any monster/boss art, built lazily the first time that shadow appears.
+ artOf(key){if(key.startsWith('boss_')){const b=BOSS_ART[key.slice(5)];if(b)return {art:{...MONSTER_ART[b.base],...b.over},k:b.k}}return {art:MONSTER_ART[key]||MONSTER_ART.shadow,k:1}}
+ shadowMonster(key,pose){const sets=this.shadows||(this.shadows={});if(!sets[key]){const {art,k}=this.artOf(key);sets[key]=this.set(art,k,true)}return sets[key][pose]}
 }
 // Visual state is intentionally separate from combat timing and hitboxes.
 class PlayerAnimation{
@@ -712,7 +737,7 @@ class TrafficSystem{
 // NPC runs a small state machine (walk / window / guard / talk / follow / loiter / flee / alert /
 // patrol / return). Road crossings always use the crosswalks; at signalised crossings people wait
 // for the pedestrian phase and, everywhere, for a gap in the traffic.
-const NPC_RULES={roam:150,fleeR:430,combatR:300,alertR:950,patrolR:[150,230],maxPatrol:4,walk:[32,50],run:[118,150],near:1500};
+const NPC_RULES={spawnRad:8,roam:150,fleeR:430,combatR:300,alertR:950,patrolR:[150,230],maxPatrol:4,walk:[32,50],run:[118,150],near:1500};
 class PedGraph{
  constructor(world){const W=CITY.walk.filter(l=>l.b>l.a),H=W.filter(l=>l.axis==='h'),V=W.filter(l=>l.axis==='v'),nodes=[],key=new Map(),free=(x,y)=>!world.blocked(x,y,6,true);
   const node=(x,y)=>{const k=Math.round(x)+','+Math.round(y);let n=key.get(k);if(!n){n={id:nodes.length,x:Math.round(x),y:Math.round(y),out:[]};nodes.push(n);key.set(k,n)}return n};
@@ -823,13 +848,16 @@ class CityNPCSystem{
   for(const p of HUB.posts)this.list.push(new CityNPC(this,PEOPLE.special.guard,null,{x:p.x,y:p.y+4,post:true,face:2,state:'guardpost'}));
   const spots=[[620,470,0,1],[650,478,4,1],[1150,470,4,1],[1120,478,0,1],[760,560,2,0],[1040,560,2,0],[860,470,0,1],[890,462,4,1],[560,760,6,1],[590,752,4,1],[1240,760,4,1],[1210,768,0,1]];
   spots.forEach(([x,y,f,chat],i)=>this.list.push(new CityNPC(this,i%3===2?civ[(i*7)%civ.length]:hun[(i*5)%hun.length],null,{x:HUB.ox+x,y:HUB.oy+y,state:'loiter',face:f,chat:!!chat,timer:rand(20,60)})));
+  // Spawn validation: nobody may start inside a building, wall, pond or parked car.
+  for(const a of this.list)if(!this.free(a.x,a.y)){const sp=spiralSearch(a.x,a.y,(x,y)=>this.free(x,y),{rad:NPC_RULES.spawnRad,maxR:240});if(sp){a.x=sp.x;a.y=sp.y}}
   this.list.forEach(a=>{if(a.state==='loiter'&&a.kind==='hunter'){a.anchor={x:a.x,y:a.y}}})}
+ free(x,y,cars=false){const w=this.world,r=NPC_RULES.spawnRad;return x>40&&y>40&&x<w.w-40&&y<w.h-40&&!w.blocked(x,y,r,!cars)}
  onScreen(a,g){const c=g.camera;return a.x>c.x-60&&a.x<c.x+(typeof canvas!=='undefined'?canvas.width:1280)+60&&a.y>c.y-80&&a.y<c.y+(typeof canvas!=='undefined'?canvas.height:800)+80}
  gateFor(a,g){for(const gt of g.gates.list){const d=Math.hypot(gt.x-a.x,gt.y-a.y);if(d<NPC_RULES.alertR&&this.list.filter(o=>o.gate===gt).length<NPC_RULES.maxPatrol)return gt}return null}
  update(dt,g){for(const a of this.list)a.update(dt,g);
   // Keep the neighbourhood of the player lively: relocate far-away walkers to off-screen nodes nearby.
   this.recycleT-=dt;if(this.recycleT<=0&&g.player){this.recycleT=.35;const p=g.player,near=this.list.filter(a=>Math.abs(a.x-p.x)<NPC_RULES.near&&Math.abs(a.y-p.y)<NPC_RULES.near).length;
-   if(near<55){const far=this.list.find(a=>a.state==='walk'&&!a.leader&&Math.hypot(a.x-p.x,a.y-p.y)>2600);if(far){for(let i=0;i<8;i++){const n=this.graph.random(),d=Math.hypot(n.x-p.x,n.y-p.y);if(d>700&&d<1400&&!this.onScreen(n,g)){far.x=n.x;far.y=n.y;far.node=n;far.path=[];far.edgeTo=null;far.prev=null;if(far.partner){far.partner.x=n.x+10;far.partner.y=n.y}break}}}}}}
+   if(near<55){const far=this.list.find(a=>a.state==='walk'&&!a.leader&&Math.hypot(a.x-p.x,a.y-p.y)>2600);if(far){for(let i=0;i<8;i++){const n=this.graph.random(),d=Math.hypot(n.x-p.x,n.y-p.y);if(d>700&&d<1400&&!this.onScreen(n,g)&&this.free(n.x,n.y,true)){far.x=n.x;far.y=n.y;far.node=n;far.path=[];far.edgeTo=null;far.prev=null;if(far.partner){const ps=spiralSearch(n.x+10,n.y,(x,y)=>this.free(x,y,true),{rad:NPC_RULES.spawnRad,maxR:60})||n;far.partner.x=ps.x;far.partner.y=ps.y}break}}}}}}
  visible(v){return this.list.filter(a=>a.x>v.x-40&&a.x<v.x+v.w+40&&a.y>v.y-20&&a.y<v.y+v.h+70)}
 }
 class WorldMap{constructor(kind='hub',rank='E'){this.kind=kind;this.rank=rank;this.w=kind==='hub'?HUB.w:1800;this.h=kind==='hub'?HUB.h:1200;this.tile=this.makeTile();if(kind==='hub'){this.solids=CITY.solids;this.grid=CITY.grid;this.buildingCache=new Map();this.traffic=new TrafficSystem();this.npcs=typeof CityNPCSystem!=='undefined'?new CityNPCSystem(this):null}}
@@ -884,7 +912,9 @@ river(c,t,v){const Y=RIVER.y,H=RIVER.h;if(v.y+v.h<Y-80||v.y>Y+H+80)return;const 
  c.fillStyle='#3b4646';c.fillRect(x0,Y-60,w,62);c.fillRect(x0,Y+H-2,w,62);c.fillStyle='#55625f';for(let x=x0-x0%32;x<x1;x+=32){c.fillRect(x,Y-58,30,4);c.fillRect(x,Y+H+54,30,4)}
  c.fillStyle='#2f3a3a';for(let x=x0-x0%96;x<x1;x+=96){c.fillRect(x+40,Y-40,2,30);c.fillRect(x+70,Y+H+16,2,30)}
  const g=c.createLinearGradient(0,Y,0,Y+H);g.addColorStop(0,'#0e3348');g.addColorStop(1,'#061a28');c.fillStyle=g;c.fillRect(x0,Y,w,H);
- c.fillStyle='#8fb6c4';for(let i=0;i<90;i++){const x=x0+((i*173+t*(12+i%5*4))%(w+100))-50,y=Y+20+(i*37)%(H-30);c.globalAlpha=.22+.2*Math.sin(t*2+i);c.fillRect(x,y,14+i%3*8,2)}c.globalAlpha=1;
+ // Current streaks live in fixed world cells (not in the viewport), so they stay put on the
+ // water while the camera pans; each one drifts with the flow and fades out before wrapping.
+ c.fillStyle='#8fb6c4';const WC=160;for(let gx=Math.floor((x0-40)/WC);gx*WC<x1+40;gx++)for(let j=0;j<8;j++){const sp=12+j%5*4,ph=(hash2(gx,j)*WC+t*sp)%WC,k=ph/WC,x=gx*WC+ph,y=Y+20+hash2(gx,j+31)*(H-30);c.globalAlpha=(.22+.2*Math.sin(t*2+gx+j))*Math.sin(k*Math.PI);c.fillRect(x,y,14+j%3*8,2)}c.globalAlpha=1;
  // City light reflections shimmer on the water.
  c.save();c.globalCompositeOperation='lighter';for(let x=x0-x0%140;x<x1;x+=140){const k=(x/140)%3;c.globalAlpha=.08+.05*Math.sin(t*1.7+x);c.fillStyle=k<1?'#ffd27a':k<2?'#b06bff':'#3fd6ff';for(let j=0;j<5;j++)c.fillRect(x+20+Math.sin(t*2+j+x)*4,Y+14+j*16,26-j*4,3)}c.restore();
  c.fillStyle='#22302f';c.fillRect(x0,Y-4,w,6);c.fillRect(x0,Y+H-2,w,6);c.fillStyle='#7d8b90';c.fillRect(x0,Y-16,w,2);c.fillRect(x0,Y+H+4,w,2);c.fillStyle='#65737a';for(let x=x0-x0%40+10;x<x1;x+=40){c.fillRect(x,Y-16,3,13);c.fillRect(x,Y+H+4,3,12)}
@@ -1148,10 +1178,13 @@ class DungeonGenerator{
    const neighbors=[[col-1,row],[col+1,row],[col,row-1],[col,row+1]].filter(([x,y])=>x>=0&&x<3&&y>=0&&y<3&&!visited.has(y*3+x));
    if(!neighbors.length){frontier.pop();continue}
    const [x,y]=neighbors[Math.floor(Math.random()*neighbors.length)], next=y*3+x, a=rooms[current], b=rooms[next];
-   if(a.cy===b.cy)corridors.push({x:Math.min(a.cx,b.cx),y:a.cy-55,w:Math.abs(a.cx-b.cx),h:110});
-   else corridors.push({x:a.cx-55,y:Math.min(a.cy,b.cy),w:110,h:Math.abs(a.cy-b.cy)});
+   // Corridors remember the two rooms they join (a/b) and their "gap" (the stretch outside both
+   // rooms), which is what fog of war and room-based aggro treat as the corridor zone.
+   if(a.cy===b.cy){const L=a.cx<b.cx?a:b,R=a.cx<b.cx?b:a;corridors.push({x:Math.min(a.cx,b.cx),y:a.cy-55,w:Math.abs(a.cx-b.cx),h:110,a:current,b:next,gap:{x:L.x+L.w,y:a.cy-55,w:R.x-(L.x+L.w),h:110}})}
+   else{const T=a.cy<b.cy?a:b,B=a.cy<b.cy?b:a;corridors.push({x:a.cx-55,y:Math.min(a.cy,b.cy),w:110,h:Math.abs(a.cy-b.cy),a:current,b:next,gap:{x:a.cx-55,y:T.y+T.h,w:110,h:B.y-(T.y+T.h)}})}
    visited.add(next);frontier.push(next);
   }
+  rooms.forEach((r,i)=>{r.id=i;r.links=corridors.filter(c=>c.a===i||c.b===i).map(c=>c.a===i?c.b:c.a)});
   world.rooms=rooms;world.corridors=corridors;world.walkable=[...rooms,...corridors];world.wallLayer=document.createElement('canvas');world.wallLayer.width=world.w;world.wallLayer.height=world.h;world.drawDungeonWalls(world.wallLayer.getContext('2d'));return world;
  }
 }
@@ -1249,7 +1282,7 @@ const BOSS_TYPES={
 class Enemy{
  constructor(x,y,type,level,boss=false,opts={}){
   const def=boss?(BOSS_TYPES[type]||BOSS_TYPES.E):(MONSTER_TYPES[type]||MONSTER_TYPES.goblin),red=!!opts.red;
-  Object.assign(this,{x,y,type,level,boss,def,name:def.name,art:def.art,radius:def.radius,speed:def.speed,aggro:def.aggro,red,dmgMult:red?1.3:1,cool:0,flash:0,stun:0,facing:1,state:'chase',stateT:0,current:null,animT:rand(0,4)});
+  Object.assign(this,{x,y,home:{x,y},alerted:false,type,level,boss,def,name:def.name,art:def.art,radius:def.radius,speed:def.speed,aggro:def.aggro,red,dmgMult:red?1.3:1,cool:0,flash:0,stun:0,facing:1,state:'chase',stateT:0,current:null,animT:rand(0,4)});
   this.maxhp=Math.round((def.hp[0]+def.hp[1]*level)*(red?1.35:1));this.hp=this.maxhp;
   this.attacks=def.attacks.map(a=>({...a,cd:rand(.4,1.4)+(a.kind==='super'?6:0)}));
  }
@@ -1259,15 +1292,20 @@ class Enemy{
   this.flash-=dt;this.stun-=dt;this.animT+=dt;for(const a of this.attacks)a.cd-=dt;
   if(this.bleed>0){this.bleed-=dt;this.bleedTick=(this.bleedTick||0)-dt;if(this.bleedTick<=0){this.bleedTick=.5;g.hit(this,3+g.player.stats.INT,false);if(!g.enemies.includes(this))return}}
   if(this.stun>0){if(this.state!=='chase'){this.state='chase';this.current=null}return}
-  let p=g.player,near=g.soldiers.filter(s=>s.state!=='REGENERATE'&&dist(this,s)<dist(this,p)).sort((a,b)=>dist(this,a)-dist(this,b))[0];p=near||p;
+  // Room-based awareness: a monster only notices targets standing in its own room/corridor (or,
+  // once it is already hunting, in a zone right next to it). Otherwise it stays in the dark.
+  const target=[g.player,...g.soldiers.filter(s=>s.state!=='REGENERATE')].filter(t=>g.canEngage(this,t)).sort((a,b)=>dist(this,a)-dist(this,b))[0];
+  let p=target||g.player;
   const d=dist(this,p),ang=Math.atan2(p.y-this.y,p.x-this.x);
   if(this.state==='windup'){this.stateT-=dt;if(this.stateT>this.current.windup*.45){this.aim=ang;this.aimPos={x:p.x,y:p.y}}if(this.stateT<=0)g.enemyStrike(this,this.current);return}
   if(this.state==='lunge'){const a=this.current;g.moveActor(this,Math.cos(this.aim)*a.dash*dt,Math.sin(this.aim)*a.dash*dt);if(Math.random()<.6)g.particles.burst(this.x,this.y,this.red?'#ff4b57':'#c9d6e0',1,{speed:40});
    for(const tg of g.enemyTargets())if(!this.lungeHit.has(tg)&&dist(this,tg)<this.radius+18){this.lungeHit.add(tg);g.enemyDamage(tg,this.damageOf(a),a,this)}
    this.stateT-=dt;if(this.stateT<=0){this.state='recover';this.stateT=a.recover}return}
   if(this.state==='recover'){this.stateT-=dt;if(this.stateT<=0){this.state='chase';this.current=null}return}
-  if(Math.abs(p.x-this.x)>4)this.facing=p.x>this.x?1:-1;
-  if(d>this.aggro)return;
+  if(!target||d>this.aggro){if(!target)this.alerted=false;
+   // Lost track: walk back to the spawn point of its room.
+   if(!this.alerted&&this.home&&dist(this,this.home)>24){const ha=Math.atan2(this.home.y-this.y,this.home.x-this.x);if(Math.abs(this.home.x-this.x)>4)this.facing=this.home.x>this.x?1:-1;g.moveActor(this,Math.cos(ha)*this.speed*.55*dt,Math.sin(ha)*this.speed*.55*dt)}return}
+  this.alerted=true;if(Math.abs(p.x-this.x)>4)this.facing=p.x>this.x?1:-1;
   const ready=this.attacks.filter(a=>a.cd<=0&&d<=a.range&&d>=(a.minRange||0)).sort((a,b)=>b.id-a.id)[0];
   if(ready){this.state='windup';this.current=ready;this.stateT=ready.windup;this.aim=ang;this.aimPos={x:p.x,y:p.y};ready.cd=ready.cooldown;for(const o of this.attacks)o.cd=Math.max(o.cd,.35);
    if(ready.kind==='super'){g.message(`⚠ ${this.name} · ${ready.name}`);g.shake(7,.5);g.sound.play('alert')}return}
@@ -1275,27 +1313,63 @@ class Enemy{
  }
 }
 class Boss extends Enemy{constructor(x,y,type,level,name,opts={}){super(x,y,type,level,true,opts);if(name)this.name=name}}
+// ---- Shadow army -----------------------------------------------------------------------------
+// Every extracted shadow keeps the type, look (shadow palette), size and attack kit of the monster
+// it was raised from, plus its own level/XP. Capacity grows with the player's level and INT.
+const SHADOW_GENERIC={name:'SOLDADO DAS SOMBRAS',size:'Médio',art:'shadow',hp:[90,8],speed:120,aggro:260,radius:16,attacks:[ATK(1,'Corte Sombrio','melee',{range:58,arc:1.1,damage:[10,2],windup:.12,recover:.3,cooldown:.8})]};
+const ARMY_RULES={base:2,perINT:4,perLevel:5,seek:300,leash:700,regen:4,regenMP:15,xpNeed:l=>30+l*15,maxLevel:99};
+const armyCap=p=>ARMY_RULES.base+Math.floor(p.stats.INT/ARMY_RULES.perINT)+Math.floor((p.level-1)/ARMY_RULES.perLevel);
+const shadowDef=d=>(d.boss?BOSS_TYPES[d.type]:MONSTER_TYPES[d.type])||SHADOW_GENERIC;
+// Old saves stored only {name,rank,kills}: recover the monster type from its name when possible.
+function normalizeShadow(d,lvl=1){if(!d.type){const b=Object.entries(BOSS_TYPES).find(([,v])=>v.name===d.name),m=Object.entries(MONSTER_TYPES).find(([,v])=>v.name===d.name);if(b){d.type=b[0];d.boss=true}else if(m){d.type=m[0];d.boss=false}}
+ d.boss=!!d.boss;d.level=Math.max(1,d.level||lvl);d.xp=d.xp||0;d.kills=d.kills||0;d.rank=d.rank||(d.boss?'Comandante':'Normal');d.art=shadowDef(d).art;return d}
 class ShadowSoldier{
- constructor(data,i){this.data=data;this.x=game.player.x+i*20;this.y=game.player.y+50;this.cool=0;this.maxhp=90+game.player.level*8;this.hp=this.maxhp;this.state='FOLLOW';this.regen=0;this.facing=1;this.animT=rand(0,4)}
+ constructor(data,i,pos){const g=game,p=g.player;normalizeShadow(data,p.level);this.data=data;this.def=shadowDef(data);this.type=data.type||'shadow';this.boss=data.boss;this.name=data.name;this.art=this.def.art;this.radius=this.def.radius;this.isShadow=true;this.slot=i;
+  const sp=pos||{x:p.x,y:p.y};this.x=sp.x;this.y=sp.y;this.cool=0;this.state='FOLLOW';this.regen=0;this.facing=1;this.animT=rand(0,4);this.act=null;this.hurtT=0;
+  this.attacks=this.def.attacks.map(a=>({...a,cd:rand(.2,.8)+(a.kind==='super'?4:0)}));this.refresh();this.hp=this.maxhp}
+ get level(){return this.data.level}
+ get power(){return 1+game.player.stats.INT*.02}
+ get speed(){return Math.max(125,this.def.speed*1.15)}
+ refresh(){const d=this.def;this.maxhp=Math.round((d.hp[0]+d.hp[1]*this.level)*this.power)}
+ damageOf(a){return Math.round((a.damage[0]+a.damage[1]*this.level)*this.power)}
+ gainXP(e,g){const d=this.data;if(d.level>=ARMY_RULES.maxLevel)return;d.xp+=(e.boss?60:10)+e.level*3;let up=false;while(d.xp>=ARMY_RULES.xpNeed(d.level)&&d.level<ARMY_RULES.maxLevel){d.xp-=ARMY_RULES.xpNeed(d.level);d.level++;up=true}
+  if(up){const r=this.hp/this.maxhp;this.refresh();this.hp=Math.max(this.hp,Math.round(this.maxhp*Math.max(r,.5)));g.floats.push({x:this.x,y:this.y-60,text:`SOMBRA LV ${d.level}`,life:1.1,color:'#c99bff',size:13});g.particles.burst(this.x,this.y-20,'#8ff0ff',16,{speed:120,lift:40})}}
  update(dt,g,i){
-  this.cool-=dt;this.animT+=dt;
-  if(this.state==='REGENERATE'){this.regen-=dt;if(this.regen<=0&&g.player.mp>=15){g.player.mp-=15;this.hp=this.maxhp;this.state='FOLLOW';g.particles.burst(this.x,this.y,'#a855f7',20)}return}
-  let target=g.enemies.filter(e=>dist(e,this)<260).sort((a,b)=>dist(a,this)-dist(b,this))[0];
-  let goal=target||{x:g.player.x+Math.cos(i*2)*55,y:g.player.y+Math.sin(i*2)*55},d=dist(this,goal),reach=target?48+target.radius*.6:0;this.state=target?(d<reach?'ATTACK':'ENGAGE'):'FOLLOW';
-  if(Math.abs(goal.x-this.x)>3)this.facing=goal.x>this.x?1:-1;
-  if(d>(target?reach*.8:8))g.moveActor(this,(goal.x-this.x)/d*120*dt,(goal.y-this.y)/d*120*dt);
-  if(target&&d<reach&&this.cool<=0){this.cool=.8;this.swing=.22;g.particles.burst(target.x,target.y-14,'#b96eff',6,{speed:120});g.hit(target,10+g.player.level*2,false,this)}
- }
- hurt(amount,g){if(this.state==='REGENERATE')return;this.hp-=amount;if(this.hp<=0){this.state='REGENERATE';this.regen=4;g.particles.burst(this.x,this.y,'#a855f7',20)}}
+  this.cool-=dt;this.animT+=dt;this.hurtT-=dt;for(const a of this.attacks)a.cd-=dt;
+  if(this.state==='REGENERATE'){this.regen-=dt;if(this.regen<=0&&g.player.mp>=ARMY_RULES.regenMP){g.player.mp-=ARMY_RULES.regenMP;this.hp=this.maxhp;this.state='FOLLOW';g.particles.burst(this.x,this.y,'#a855f7',20)}return}
+  const p=g.player;
+  // Left behind (walls, long dash, other room): re-materialise on a free spot next to the master.
+  if(dist(this,p)>ARMY_RULES.leash){const sp=g.findFreeSpot(p.x,p.y,this.radius,40,220,{los:true,avoid:g.soldiers.filter(s=>s!==this),sep:28,angle:(p.angle||0)+Math.PI});if(sp){g.particles.burst(this.x,this.y,'#3b1466',10,{speed:60});this.x=sp.x;this.y=sp.y;this.act=null;g.particles.burst(this.x,this.y-10,'#a855f7',16,{speed:90,lift:30})}}
+  if(this.act){this.runAction(dt,g);return}
+  // Soft separation so shadows spread out instead of stacking on the same pixel.
+  for(const o of g.soldiers){if(o===this||o.state==='REGENERATE')continue;const dx=this.x-o.x,dy=this.y-o.y,dd=Math.hypot(dx,dy)||.01,min=(this.radius+o.radius)*.85;if(dd<min){const push=Math.min(60*dt,(min-dd)*.5);g.moveActor(this,dx/dd*push,dy/dd*push)}}
+  const target=g.enemies.filter(e=>dist(e,this)<ARMY_RULES.seek&&g.shadowCanTarget(e)).sort((a,b)=>dist(a,this)-dist(b,this))[0];
+  if(target){const d=dist(this,target),ang=Math.atan2(target.y-this.y,target.x-this.x);if(Math.abs(target.x-this.x)>3)this.facing=target.x>this.x?1:-1;
+   const ready=this.attacks.filter(a=>a.cd<=0&&d<=a.range+target.radius*.5&&d>=(a.minRange||0)).sort((a,b)=>b.id-a.id)[0];
+   if(ready){this.state='ATTACK';ready.cd=ready.cooldown*.9;for(const o of this.attacks)o.cd=Math.max(o.cd,.3);this.act={a:ready,phase:'windup',t:ready.windup*.6,aim:ang,tg:target,pos:{x:target.x,y:target.y}};return}
+   this.state='ENGAGE';const keep=this.attacks[0].range*.7+target.radius*.4;if(d>keep)g.moveActor(this,Math.cos(ang)*this.speed*dt,Math.sin(ang)*this.speed*dt);return}
+  // Formation behind the player; slots that fall inside a wall collapse onto the player.
+  this.state='FOLLOW';const n=Math.max(1,g.soldiers.length),row=Math.floor(i/6),a0=(p.angle||0)+Math.PI+((i%6)-(Math.min(6,n)-1)/2)*.55,r=58+row*36;
+  let goal={x:p.x+Math.cos(a0)*r,y:p.y+Math.sin(a0)*r*.8};if(!g.isWalkable(goal.x,goal.y,Math.min(this.radius,20)))goal={x:p.x,y:p.y};
+  const d=dist(this,goal);if(Math.abs(goal.x-this.x)>3&&d>8)this.facing=goal.x>this.x?1:-1;
+  if(d>(goal.x===p.x&&goal.y===p.y?40:8)){const sp=this.speed*(d>220?1.5:1);g.moveActor(this,(goal.x-this.x)/d*Math.min(sp*dt,d),(goal.y-this.y)/d*Math.min(sp*dt,d))}}
+ runAction(dt,g){const A=this.act,a=A.a;A.t-=dt;
+  if(A.phase==='windup'){if(A.tg&&g.enemies.includes(A.tg)&&A.t>a.windup*.25){A.aim=Math.atan2(A.tg.y-this.y,A.tg.x-this.x);A.pos={x:A.tg.x,y:A.tg.y}}if(A.t<=0)g.shadowStrike(this,A);return}
+  if(A.phase==='lunge'){g.moveActor(this,Math.cos(A.aim)*a.dash*dt,Math.sin(A.aim)*a.dash*dt);if(Math.random()<.6)g.particles.burst(this.x,this.y,'#7b2cff',1,{speed:40});
+   for(const e of [...g.enemies])if(!A.hit.has(e)&&dist(this,e)<this.radius+e.radius+10){A.hit.add(e);g.hit(e,this.damageOf(a),false,this,A.aim)}
+   if(A.t<=0){A.phase='recover';A.t=a.recover*.6}return}
+  if(A.t<=0){this.act=null;this.state='ENGAGE'}}
+ hurt(amount,g){if(this.state==='REGENERATE')return;this.hp-=amount;this.hurtT=.15;if(this.hp<=0){this.hp=0;this.act=null;this.state='REGENERATE';this.regen=ARMY_RULES.regen;g.particles.burst(this.x,this.y,'#a855f7',20)}}
 }
+const FOG_RULES={perAdjacent:15};
 const GATE_MONSTERS=idx=>idx<2?['goblin','wolf','spider']:idx<4?['orc','orc','demon']:idx===4?['bear','wolf']:['demon','orc'];
 const fmtTime=s=>`${String(Math.floor(Math.max(0,s)/60)).padStart(2,'0')}:${String(Math.floor(Math.max(0,s)%60)).padStart(2,'0')}`;
 function attackLine(a,level){const kind={melee:'Corpo a corpo',slam:'Área',projectile:'Projétil',lunge:'Investida',super:'Super'}[a.kind];return `<div class="atk-row ${a.kind==='super'?'super':''}"><b>ATQ ${a.id}</b><span>${a.name.replace('SUPER · ','')}</span><small>${kind} · alcance ${a.radius||a.range} · dano ${Math.round(a.damage[0]+a.damage[1]*level)}</small></div>`}
 function monsterCard(def,level,boss=false){return `<div class="beast ${boss?'boss':''}"><div class="beast-head"><b>${def.name}</b><span>${def.size}</span></div><div class="beast-stats"><span>HP <b>${Math.round(def.hp[0]+def.hp[1]*level)}</b></span><span>VEL <b>${def.speed}</b></span><span>ALCANCE <b>${Math.max(...def.attacks.map(a=>a.range))}</b></span></div>${def.attacks.map(a=>attackLine(a,level)).join('')}</div>`}
 class UIManager{static open(type){game.panel=type;let p=game.player,box=$('#modal');box.classList.remove('hidden');let content='';
- if(type==='status'){content=`<p>Nível ${p.level} · Rank ${p.rank} · EXP ${p.xp}/${p.level*100} <br>Pontos disponíveis: <b>${p.points}</b></p>`+Object.entries(p.stats).map(([k,v])=>`<div class="stat-row"><b>${k}</b><span>${v} <button class="action" data-stat="${k}">+</button></span></div>`).join('')+`<p class="muted">ATQ ${Math.floor(10+p.stats.FOR*3.5+weapons[p.weapon].damage)} · DEF ${Math.min(60,p.stats.VIT*.8).toFixed(1)}% · CRÍTICO ${(5+p.stats.PER*1.2).toFixed(1)}% · SOMBRAS ${2+Math.floor(p.stats.INT/4)}</p>`}
+ if(type==='status'){content=`<p>Nível ${p.level} · Rank ${p.rank} · EXP ${p.xp}/${p.level*100} <br>Pontos disponíveis: <b>${p.points}</b></p>`+Object.entries(p.stats).map(([k,v])=>`<div class="stat-row"><b>${k}</b><span>${v} <button class="action" data-stat="${k}">+</button></span></div>`).join('')+`<p class="muted">ATQ ${Math.floor(10+p.stats.FOR*3.5+weapons[p.weapon].damage)} · DEF ${Math.min(60,p.stats.VIT*.8).toFixed(1)}% · CRÍTICO ${(5+p.stats.PER*1.2).toFixed(1)}% · SOMBRAS ${game.army.length}/${armyCap(p)}<br>VISÃO NA DUNGEON: ${p.stats.PER>=FOG_RULES.perAdjacent?'SALAS ADJACENTES REVELADAS':`APENAS A SALA ATUAL (PER ${FOG_RULES.perAdjacent} revela salas adjacentes)`}</p>`}
  else if(type==='inventory'){content=`<p>OURO: <b>${p.gold} G</b></p>${p.owned.map(i=>`<div class="item-row"><b>⚔ ${weapons[i].name}</b><span>ATQ +${weapons[i].damage} <button class="action" data-equip="${i}">${i===p.weapon?'EQUIPADA':'EQUIPAR'}</button></span></div>`).join('')}<div class="item-row"><b>♥ Poção de vida</b><span>${p.hppots} unidades</span></div><div class="item-row"><b>♦ Poção de mana</b><span>${p.mppots} unidades</span></div>`}
- else if(type==='army'){content=`<p>SOLDADOS: ${game.army.length} / ${2+Math.floor(p.stats.INT/4)} · ${game.summoned?'INVOCADOS':'NA RESERVA'}</p>`+(game.army.length?game.army.map((s,i)=>`<div class="item-row"><b>♟ ${s.name}</b><span>${s.rank||'Normal'} · Nv. ${p.level} · ${s.kills||0} abates <button class="action" data-dismiss="${i}">DISPENSAR</button></span></div>`).join(''):'<p class="muted">Derrote inimigos e pressione E perto de seus corpos para extrair sombras.</p>')+`<button class="action" data-do="summon">INVOCAR / GUARDAR [R]</button>`}
+ else if(type==='army'){const cap=armyCap(p);game.army.forEach(s=>normalizeShadow(s,p.level));content=`<p>SLOTS: <b>${game.army.length} / ${cap}</b> · ${game.summoned?'INVOCADOS':'NA RESERVA'}</p><p class="muted">Capacidade = ${ARMY_RULES.base} + INT/${ARMY_RULES.perINT} + 1 a cada ${ARMY_RULES.perLevel} níveis. Próximo slot: INT ${(Math.floor(p.stats.INT/ARMY_RULES.perINT)+1)*ARMY_RULES.perINT} ou nível ${(Math.floor((p.level-1)/ARMY_RULES.perLevel)+1)*ARMY_RULES.perLevel+1}.</p>`+(game.army.length?game.army.map((s,i)=>{const d=shadowDef(s);return `<div class="item-row"><b>♟ ${s.name}<small class="muted"> · ${d.size||''} · ${d.attacks.map(a=>a.name.replace('SUPER · ','★ ')).join(' / ')}</small></b><span>${s.rank} · LV ${s.level} · ${s.kills} abates <button class="action" data-dismiss="${i}">DISPENSAR</button></span></div>`}).join(''):'<p class="muted">Derrote inimigos e pressione E perto de seus corpos para extrair sombras.</p>')+`<button class="action" data-do="summon">INVOCAR / GUARDAR [R]</button>`}
  else if(type==='shop'){content=game.world.kind!=='hub'?'<p>A loja está disponível apenas na cidade.</p>':`<p>OURO: ${p.gold} G</p>`+weapons.map((w,i)=>`<div class="item-row"><b>${w.name} <small>ATQ +${w.damage}</small></b><button class="action" data-buy="${i}">${i===p.weapon?'EQUIPADA':p.owned.includes(i)?'EQUIPAR':w.price+' G'}</button></div>`).join('')+`<button class="action" data-potion="hp">POÇÃO HP · 40 G</button><button class="action" data-potion="mp">POÇÃO MP · 40 G</button>`}
  else if(type==='gate'){const gate=game.selectedGate;if(!gate||!game.gates.list.includes(gate)){content='<p>Este gate já se fechou.</p>'}else{const idx=RANKS.indexOf(gate.rank),boss=BOSS_TYPES[gate.rank],types=[...new Set(GATE_MONSTERS(idx))];
   content=`<div class="gate-card ${gate.red?'red':'blue'}"><div class="gate-rank">${gate.rank}</div><div><b>${gate.red?'GATE VERMELHO':'GATE AZUL'} · RANK ${gate.rank}</b><small>${gate.district} · FECHA EM <span id="gateTime">${fmtTime(gate.life)}</span></small><small>${gate.red?'Monstros +35% HP e +30% dano · recompensas x2':'Dificuldade padrão · recompensas x1'}</small></div></div>`+
@@ -1326,8 +1400,15 @@ message(text){$('#notice').textContent=text;clearTimeout(this.noticeTimer);this.
 shake(mag,time=.25){this.shakeMag=Math.max(this.shakeMag,mag);this.shakeT=Math.max(this.shakeT,time)}
 key(k){if(!this.started)return;if(k==='h'){HudManager.toggleClean();return}if(this.panel){if(this.panel==='dead')return;if(['escape','tab','c','i','v','b','n'].includes(k))UIManager.close();return}if(k==='c'||k==='tab')UIManager.open('status');else if(k==='i')UIManager.open('inventory');else if(k==='v')UIManager.open('army');else if(k==='b')UIManager.open('shop');else if(k==='n')UIManager.open('bestiary');else if(k==='escape')UIManager.open('pause');else if(k==='e')this.interact();else if(k==='r')this.toggleArmy();else if(k==='shift')this.dash();else if(k===' ')this.attack();else if(['1','2','3'].includes(k))this.skill(+k);else if(k==='q')this.potion('hp');else if(k==='f')this.potion('mp')}
 enter(rank,red=false){UIManager.close();this.world=DungeonGenerator.create(rank);this.animation=new PlayerAnimation(this.sprites);this.player.x=300;this.player.y=600;this.bossDefeated=false;this.chest=false;this.redGate=!!red;this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.corpses=[];this.soldiers=[];this.summoned=false;let idx=Math.max(0,RANKS.indexOf(rank)),types=GATE_MONSTERS(idx);this.enemies=[];
- for(let i=0;i<16+idx*2+(red?4:0);i++){let room=this.world.rooms[[0,1,2,4,6,7,8][i%7]];this.enemies.push(new Enemy(rand(room.x+50,room.x+room.w-50),rand(room.y+50,room.y+room.h-50),types[i%types.length],1+idx*8,false,{red}))}
- this.enemies.push(new Boss(1500,600,rank,3+idx*8,BOSS_TYPES[rank].name,{red}));this.message(`${red?'GATE VERMELHO':'GATE'} RANK ${rank} · SUBJUGUE O CHEFE`);this.sound.play('alert')}
+ // Every monster is placed only on a validated walkable spot (inside its room, clear of walls and of
+ // the other monsters); if random tries fail, a ring search from the room centre takes over.
+ const bdef=BOSS_TYPES[rank]||BOSS_TYPES.E,bossRoom=this.world.rooms[5],bsp=this.findFreeSpot(bossRoom.cx,bossRoom.cy,bdef.radius,0,200)||{x:bossRoom.cx,y:bossRoom.cy};
+ const placed=[{x:bsp.x,y:bsp.y,radius:bdef.radius}];
+ for(let i=0;i<16+idx*2+(red?4:0);i++){const room=this.world.rooms[[0,1,2,4,6,7,8][i%7]],type=types[i%types.length],def=MONSTER_TYPES[type],R=def.radius;
+  const free=(x,y)=>x>=room.x+R+12&&x<=room.x+room.w-R-12&&y>=room.y+R+12&&y<=room.y+room.h-R-12&&this.isWalkable(x,y,R)&&placed.every(o=>Math.hypot(o.x-x,o.y-y)>o.radius+R+8);
+  let sp=null;for(let t=0;t<14&&!sp;t++){const x=rand(room.x+50,room.x+room.w-50),y=rand(room.y+50,room.y+room.h-50);if(free(x,y))sp={x,y}}
+  sp=sp||spiralSearch(room.cx,room.cy,free,{rad:R,maxR:260});if(!sp)continue;placed.push({x:sp.x,y:sp.y,radius:R});this.enemies.push(new Enemy(sp.x,sp.y,type,1+idx*8,false,{red}))}
+ this.enemies.push(new Boss(bsp.x,bsp.y,rank,3+idx*8,bdef.name,{red}));this.fog=null;this.computeFog();this.message(`${red?'GATE VERMELHO':'GATE'} RANK ${rank} · SUBJUGUE O CHEFE`);this.sound.play('alert')}
 moveActor(actor,dx,dy){
  const hub=this.world.kind==='hub',rad=actor.radius?Math.min(actor.radius,22):12;
  const stuck=hub&&!!this.world.traffic&&!!this.world.traffic.hit(actor.x,actor.y,rad);
@@ -1335,11 +1416,64 @@ moveActor(actor,dx,dy){
  // Small steps prevent high-speed dashes from tunneling through a wall.
  const steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dy))/8));for(let i=0;i<steps;i++){if(valid(actor.x+dx/steps,actor.y))actor.x+=dx/steps;if(valid(actor.x,actor.y+dy/steps))actor.y+=dy/steps}
 }
+// ---- Walkable-area checks (used before ANY entity is placed) ---------------------------------
+// Hub: map bounds + building/prop/pond/car colliders. Dungeon: the actor's box must lie inside the
+// carved rooms/corridors (same rule moveActor uses), so nothing can appear inside a wall.
+isWalkable(x,y,rad=12,opts={}){const w=this.world;if(!w||x<30||y<30||x>w.w-30||y>w.h-30)return false;
+ if(w.kind==='hub')return !w.blocked(x,y,rad,!!opts.ignoreCars);
+ const m=Math.max(12,Math.min(rad,30));return [[-m,-m],[m,-m],[-m,m],[m,m]].every(([ox,oy])=>w.walkable.some(r=>x+ox>=r.x&&x+ox<=r.x+r.w&&y+oy>=r.y&&y+oy<=r.y+r.h))}
+// True when a small body can travel in a straight line from A to B (no wall in between).
+pathClear(x0,y0,x1,y1,rad=10){const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/10));for(let i=1;i<=n;i++){const k=i/n;if(!this.isWalkable(x0+(x1-x0)*k,y0+(y1-y0)*k,rad,{ignoreCars:true}))return false}return true}
+// Nearest free spot around (cx,cy) on rings minR..maxR. opts: avoid (entities), sep (min distance
+// to them), los (must be reachable in a straight line from the center), angle (preferred side).
+findFreeSpot(cx,cy,rad=12,minR=0,maxR=260,opts={}){const avoid=opts.avoid||[],sep=opts.sep??rad*2;
+ const ok=(x,y)=>this.isWalkable(x,y,rad,opts)&&avoid.every(o=>Math.hypot(o.x-x,o.y-y)>=sep+(o.radius&&opts.useRadius?o.radius:0))&&(!opts.los||this.pathClear(cx,cy,x,y,Math.min(10,rad)));
+ return spiralSearch(cx,cy,ok,{minR,maxR,rad,angle:opts.angle||0,step:opts.step||0})}
+// ---- Dungeon zones: rooms ('r#') and corridor gaps ('c#') ------------------------------------
+zoneAt(x,y){const w=this.world;if(!w||w.kind!=='dungeon')return null;for(const r of w.rooms)if(x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return 'r'+r.id;
+ for(let i=0;i<w.corridors.length;i++){const c=w.corridors[i];if(x>=c.x&&x<=c.x+c.w&&y>=c.y&&y<=c.y+c.h)return 'c'+i}return null}
+zoneOf(a){const z=this.zoneAt(a.x,a.y);if(z)a._zone=z;return z||a._zone||null}
+roomAt(x,y){const z=this.zoneAt(x,y);return z&&z[0]==='r'?+z.slice(1):-1}
+zonesAdjacent(a,b){if(!a||!b)return false;if(a===b)return true;const w=this.world;if(a[0]===b[0])return false;const c=w.corridors[+(a[0]==='c'?a:b).slice(1)],r=+(a[0]==='r'?a:b).slice(1);return !!c&&(c.a===r||c.b===r)}
+// A monster may fight a target in its own zone; once alerted it keeps chasing into adjacent zones.
+canEngage(e,t){if(this.world.kind!=='dungeon')return true;const ze=this.zoneOf(e),zt=this.zoneOf(t);if(!ze||!zt)return false;return ze===zt||(!!e.alerted&&this.zonesAdjacent(ze,zt))}
+// Shadows only pick fights the player can see (current room) or with monsters already hunting.
+shadowCanTarget(e){if(this.world.kind!=='dungeon')return true;const f=this.fog||this.computeFog();return f.lit.has(this.zoneOf(e))||!!e.alerted}
+// ---- Fog of war ------------------------------------------------------------------------------
+// Only the player's current zone is lit. Corridors leaving the current room are dimly visible;
+// with high Perception the neighbouring rooms are revealed too (enemies inside become visible).
+computeFog(){const w=this.world,p=this.player,lit=new Set(),near=new Set(),per=p.stats.PER>=FOG_RULES.perAdjacent;if(w.kind!=='dungeon')return this.fog={lit,near,per,zone:null};
+ const z=this.zoneOf(p);if(z){lit.add(z);if(z[0]==='r'){const i=+z.slice(1);w.corridors.forEach((c,k)=>{if(c.a===i||c.b===i){near.add('c'+k);if(per)near.add('r'+(c.a===i?c.b:c.a))}})}else{const c=w.corridors[+z.slice(1)];if(per){near.add('r'+c.a);near.add('r'+c.b)}}}
+ for(const r of w.rooms)if(lit.has('r'+r.id)||near.has('r'+r.id))r.seen=true;
+ return this.fog={lit,near,per,zone:z}}
+fogVisible(a){if(this.world.kind!=='dungeon')return true;const f=this.fog||this.computeFog(),z=this.zoneOf(a);return f.lit.has(z)||f.near.has(z)}
+drawFog(c){const w=this.world;if(w.kind!=='dungeon')return;const f=this.fog||this.computeFog(),t=this.time,M=16,dark='#020409';c.save();
+ w.corridors.forEach((cr,k)=>{const z='c'+k;if(f.lit.has(z))return;const g=cr.gap;c.globalAlpha=f.near.has(z)?.42:(w.rooms[cr.a].seen||w.rooms[cr.b].seen)?.82:.97;c.fillStyle=dark;
+  if(g.w<g.h)c.fillRect(g.x-M,g.y,g.w+M*2,g.h);else c.fillRect(g.x,g.y-M,g.w,g.h+M*2)});
+ for(const r of w.rooms){const z='r'+r.id;if(f.lit.has(z))continue;const a=f.near.has(z)?.5:r.seen?.8:.97;c.globalAlpha=a;c.fillStyle=dark;c.fillRect(r.x-M,r.y-M,r.w+M*2,r.h+M*2);
+  // drifting mist (world-anchored) over the dark room
+  c.save();c.beginPath();c.rect(r.x-M,r.y-M,r.w+M*2,r.h+M*2);c.clip();c.fillStyle=f.near.has(z)?'#3a2a66':'#1d1638';
+  for(let i=0;i<6;i++){const hx=hash2(r.id,i),hy=hash2(i,r.id+9),x=r.x+((hx*r.w+t*(8+i*3))%(r.w+160))-80,y=r.y+hy*r.h;c.globalAlpha=(f.near.has(z)?.16:.22)*(.6+.4*Math.sin(t*.7+i));c.beginPath();c.ellipse(x,y,70+hx*60,18+hy*14,0,0,7);c.fill()}c.restore()}
+ c.restore()}
+// ---- Shadow attacks (copies of the monster kit, aimed at enemies) ---------------------------
+shadowStrike(s,A){const a=A.a,dmg=s.damageOf(a),col='#b46bff';s.swing=.25;A.phase='recover';A.t=a.recover*.6;
+ if(a.kind==='melee'){for(const e of [...this.enemies]){const d=dist(s,e),ang=Math.atan2(e.y-s.y,e.x-s.x),diff=Math.abs(Math.atan2(Math.sin(ang-A.aim),Math.cos(ang-A.aim)));if(d<a.range+e.radius*.5+10&&diff<a.arc)this.hit(e,dmg,false,s,ang)}this.hazards.push({kind:'claw',x:s.x,y:s.y-14,angle:A.aim,r:a.range,arc:a.arc,t:.2,max:.2,color:col});this.particles.burst(s.x+Math.cos(A.aim)*a.range*.6,s.y-14+Math.sin(A.aim)*a.range*.6,'#8ff0ff',5,{angle:A.aim,spread:1.2,speed:150})}
+ else if(a.kind==='slam'){for(const e of [...this.enemies])if(dist(s,e)<a.radius)this.hit(e,dmg,false,s);this.particles.ring(s.x,s.y+8,col,a.radius,.45,6);this.particles.burst(s.x,s.y,'#4b1f86',22,{speed:220});this.shake(3,.15)}
+ else if(a.kind==='projectile'){const n=a.count||1;for(let i=0;i<n;i++){const ang=A.aim+(n>1?(i/(n-1)-.5)*a.spread*2:0);this.projectiles.push({x:s.x+Math.cos(ang)*s.radius,y:s.y-16+Math.sin(ang)*s.radius*.5,vx:Math.cos(ang)*a.speed,vy:Math.sin(ang)*a.speed,life:a.range/a.speed+.25,damage:dmg,color:'#a66bff',size:a.size||6,atk:a,owner:s,ally:true})}}
+ else if(a.kind==='lunge'){A.phase='lunge';A.t=a.dashTime;A.hit=new Set();this.particles.ring(s.x,s.y+8,col,60,.3,3)}
+ else if(a.kind==='super'){const pat=a.pattern;this.shake(6,.4);this.particles.burst(s.x,s.y-20,col,40,{speed:300});
+  if(pat==='nova'||pat==='both')for(let i=0;i<(a.rings||1);i++)this.hazards.push({kind:'nova',x:s.x,y:s.y,r:10,max:a.radius,speed:a.radius/.75,delay:i*.4,damage:dmg,hit:new Set(),color:col,atk:a,owner:s,ally:true});
+  if(pat==='rain'||pat==='both'){const c=A.pos||s;for(let i=0;i<(a.count||6);i++){const r=i?rand(50,170):0,an=rand(0,Math.PI*2);this.hazards.push({kind:'blast',x:c.x+Math.cos(an)*r,y:c.y+Math.sin(an)*r*.8,r:a.blast||70,delay:.6+i*.08,max:.6+i*.08,damage:dmg,color:col,atk:a,owner:s,boom:0,ally:true})}}}
+}
+spawnSoldiers(){const p=this.player,taken=[];return this.army.map((d,i)=>{const r=Math.min(26,shadowDef(normalizeShadow(d,p.level)).radius||16);
+ const sp=this.findFreeSpot(p.x,p.y,r,40,260,{los:true,avoid:[p,...taken],sep:r+14,angle:(p.angle||0)+Math.PI})||this.findFreeSpot(p.x,p.y,12,0,320,{avoid:taken,sep:20})||{x:p.x,y:p.y};taken.push(sp);return new ShadowSoldier(d,i,sp)})}
 returnHub(){this.world=new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.player.x=HUB.spawn.x;this.player.y=HUB.spawn.y;this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;UIManager.close();SaveSystem.save(this);this.message('ÁREA SEGURA · ASSOCIAÇÃO DOS CAÇADORES')}
 interact(){let p=this.player;if(this.world.kind==='hub'){const gate=this.gates.nearest(p);if(gate){this.selectedGate=gate;UIManager.open('gate')}else if(dist(p,HUB.merchant)<100)UIManager.open('shop');else if(dist(p,HUB.healer)<100){p.hp=p.maxhp;p.mp=p.maxmp;this.message('HP E MP RESTAURADOS');this.sound.play('alert');this.particles.burst(p.x,p.y,'#5affb0',24,{speed:90,lift:60})}}
- else{let corpse=this.corpses.find(c=>dist(c,p)<75);if(corpse){corpse.tries++;let chance=Math.min(.9,.35+p.stats.INT*.02+(p.level-corpse.level)*.03);if(this.army.length>=2+Math.floor(p.stats.INT/4)){this.message('CAPACIDADE DE SOMBRAS ATINGIDA');return}this.animation.play('summon',p,.5);this.animation.effect('summon',corpse);this.particles.burst(corpse.x,corpse.y,'#bd59ff',30);this.sound.play('shadow');if(Math.random()<chance){this.army.push({name:corpse.name,rank:corpse.boss?'Comandante':'Normal',kills:0});this.corpses.splice(this.corpses.indexOf(corpse),1);this.message('EXTRAÇÃO DE SOMBRA BEM-SUCEDIDA!');SaveSystem.save(this)}else{this.message(`EXTRAÇÃO FALHOU · ${3-corpse.tries} TENTATIVAS`);if(corpse.tries>=3)this.corpses.splice(this.corpses.indexOf(corpse),1)}return}
+ else{let corpse=this.corpses.find(c=>dist(c,p)<75);if(corpse){corpse.tries++;let chance=Math.min(.9,.35+p.stats.INT*.02+(p.level-corpse.level)*.03);if(this.army.length>=armyCap(p)){this.message(`CAPACIDADE DE SOMBRAS ATINGIDA · ${this.army.length}/${armyCap(p)}`);return}this.animation.play('summon',p,.5);this.animation.effect('summon',corpse);this.particles.burst(corpse.x,corpse.y,'#bd59ff',30);this.sound.play('shadow');if(Math.random()<chance){const d=normalizeShadow({name:corpse.name,type:corpse.type,boss:!!corpse.boss,art:corpse.art,level:corpse.level,rank:corpse.boss?'Comandante':'Normal',kills:0,xp:0},p.level);this.army.push(d);
+    // Raised on the spot when the army is out: the new shadow joins right where the body lay.
+    if(this.summoned){const sp=this.findFreeSpot(corpse.x,corpse.y,Math.min(26,shadowDef(d).radius),0,160,{avoid:this.soldiers,sep:24})||{x:p.x,y:p.y};this.soldiers.push(new ShadowSoldier(d,this.soldiers.length,sp))}this.corpses.splice(this.corpses.indexOf(corpse),1);this.message('EXTRAÇÃO DE SOMBRA BEM-SUCEDIDA!');SaveSystem.save(this)}else{this.message(`EXTRAÇÃO FALHOU · ${3-corpse.tries} TENTATIVAS`);if(corpse.tries>=3)this.corpses.splice(this.corpses.indexOf(corpse),1)}return}
   if(this.bossDefeated&&!this.chest&&dist(p,{x:1500,y:600})<90){this.chest=true;p.gold+=(200+this.world.rank.charCodeAt(0))*(this.redGate?2:1);this.unlocked=Math.min(5,Math.max(this.unlocked,RANKS.indexOf(this.world.rank)+1));this.message('BAÚ COLETADO! PORTAL DE SAÍDA ABERTO');SaveSystem.save(this)}else if(this.chest&&dist(p,{x:1560,y:650})<110)this.returnHub()}}
-toggleArmy(){this.summoned=!this.summoned;this.soldiers=this.summoned?this.army.map((s,i)=>new ShadowSoldier(s,i)):[];this.message(this.summoned?'EXÉRCITO DAS SOMBRAS INVOCADO':'SOMBRAS GUARDADAS');this.animation.play('summon',this.player,.45);this.animation.effect('summon',this.player);this.sound.play('shadow')}
+toggleArmy(){this.summoned=!this.summoned;this.soldiers=this.summoned?this.spawnSoldiers():[];for(const s of this.soldiers)this.particles.burst(s.x,s.y-12,'#a855f7',14,{speed:90,lift:40});this.message(this.summoned?'EXÉRCITO DAS SOMBRAS INVOCADO':'SOMBRAS GUARDADAS');this.animation.play('summon',this.player,.45);this.animation.effect('summon',this.player);this.sound.play('shadow')}
 // Dash: short invulnerability and an ambush bonus window (stealth). The hero stays fully opaque.
 dash(){if(!this.started||this.panel||this.player.dashCd>0)return;let p=this.player;p.dashTime=.18;p.invuln=.3;p.stealth=1.5;p.dashCd=Math.max(.5,1.3-p.stats.AGI*.01);let dx=(this.input.keys.d||this.input.keys.arrowright?1:0)-(this.input.keys.a||this.input.keys.arrowleft?1:0),dy=(this.input.keys.s||this.input.keys.arrowdown?1:0)-(this.input.keys.w||this.input.keys.arrowup?1:0);let n=Math.hypot(dx,dy);p.dashX=n?dx/n:Math.cos(p.angle);p.dashY=n?dy/n:Math.sin(p.angle);this.animation.play('dash',p,.18,Math.atan2(p.dashY,p.dashX));this.particles.ring(p.x,p.y+8,'#3fd6ff',50,.3,3);this.particles.burst(p.x,p.y-4,'#14062a',4,{kind:'smoke',speed:30,life:1,size:10});this.particles.burst(p.x,p.y-10,'#b06bff',8,{kind:'ember',speed:60,life:.8});this.sound.play('dash')}
 attack(mult=1,range=85,area=false,forceCrit=false,bypass=false,style='combo'){this.combatT=2.5;
@@ -1358,8 +1492,8 @@ skill(n){let p=this.player,cost=[0,15,25,35][n];if(p.mp<cost||p.cool>0){this.mes
 hit(e,amount,crit,source=null,angle=null){e.hp-=amount;e.flash=.14;const a=angle??Math.atan2(e.y-this.player.y,e.x-this.player.x);
  this.particles.burst(e.x,e.y-16,crit?'#ffe490':'#79eaff',crit?22:10,{angle:a,spread:1.6,speed:crit?300:220});this.particles.burst(e.x,e.y-16,'#ffffff',4,{speed:140,size:2});this.impacts.push({x:e.x,y:e.y-18,angle:a,crit,t:.2,max:.2});
  if(crit)this.shake(4,.12);if(!e.boss&&e.state!=='lunge'){this.moveActor(e,Math.cos(a)*(crit?10:5),Math.sin(a)*(crit?10:5))}
- this.floats.push({x:e.x,y:e.y-40,text:(crit?'CRÍTICO! ':'')+Math.floor(amount),life:.9,color:crit?'#ffe16c':'#fff',size:crit?20:16});this.sound.play('hit');if(e.hp<=0){if(source){source.data.kills=(source.data.kills||0)+1}this.kill(e)}}
-kill(e){let p=this.player,mult=this.redGate?2:1;this.enemies.splice(this.enemies.indexOf(e),1);this.corpses.push({x:e.x,y:e.y,life:12,tries:0,level:e.level,boss:e.boss,name:e.name});this.particles.burst(e.x,e.y-10,e.red?'#ff4b57':'#9fb4c8',18,{speed:160});p.gold+=(e.boss?150:rand(8,20)|0)*mult;p.xp+=(e.boss?120+e.level*10:20+e.level*4)*mult;this.quest++;if(this.quest>=15&&!this.questDone){p.points+=3;this.questDone=true;this.message('MISSÃO DIÁRIA COMPLETA · +3 PONTOS')}while(p.xp>=p.level*100){p.xp-=p.level*100;p.level++;p.points+=5;p.hp=p.maxhp;p.mp=p.maxmp;this.message(`LEVEL UP! NÍVEL ${p.level} · +5 PONTOS`)}if(e.boss){this.bossDefeated=true;this.hazards=[];this.projectiles=[];this.message('CHEFE DERROTADO · COLETE O BAÚ');this.particles.burst(e.x,e.y,'#ffb260',60,{speed:300});this.particles.ring(e.x,e.y,'#ffb260',220,.7,6);this.shake(10,.5)}SaveSystem.save(this)}
+ this.floats.push({x:e.x,y:e.y-40,text:(crit?'CRÍTICO! ':'')+Math.floor(amount),life:.9,color:crit?'#ffe16c':'#fff',size:crit?20:16});this.sound.play('hit');e.alerted=true;if(e.hp<=0){if(source){source.data.kills=(source.data.kills||0)+1;if(source.gainXP)source.gainXP(e,this)}this.kill(e)}}
+kill(e){let p=this.player,mult=this.redGate?2:1;this.enemies.splice(this.enemies.indexOf(e),1);this.corpses.push({x:e.x,y:e.y,life:12,tries:0,level:e.level,boss:e.boss,name:e.name,type:e.type,art:e.art});this.particles.burst(e.x,e.y-10,e.red?'#ff4b57':'#9fb4c8',18,{speed:160});p.gold+=(e.boss?150:rand(8,20)|0)*mult;p.xp+=(e.boss?120+e.level*10:20+e.level*4)*mult;this.quest++;if(this.quest>=15&&!this.questDone){p.points+=3;this.questDone=true;this.message('MISSÃO DIÁRIA COMPLETA · +3 PONTOS')}while(p.xp>=p.level*100){p.xp-=p.level*100;p.level++;p.points+=5;p.hp=p.maxhp;p.mp=p.maxmp;this.message(`LEVEL UP! NÍVEL ${p.level} · +5 PONTOS`)}if(e.boss){this.bossDefeated=true;this.hazards=[];this.projectiles=[];this.message('CHEFE DERROTADO · COLETE O BAÚ');this.particles.burst(e.x,e.y,'#ffb260',60,{speed:300});this.particles.ring(e.x,e.y,'#ffb260',220,.7,6);this.shake(10,.5)}SaveSystem.save(this)}
 damagePlayer(n){let p=this.player;if(p.invuln>0)return false;p.hp-=n*(1-Math.min(.6,p.stats.VIT*.008));p.invuln=.4;p.hurtTime=.22;this.shake(5,.18);this.particles.burst(p.x,p.y-16,'#ff6579',14,{speed:180});this.floats.push({x:p.x,y:p.y-50,text:'-'+Math.round(n*(1-Math.min(.6,p.stats.VIT*.008))),life:.8,color:'#ff7d8c',size:15});this.sound.play('hit');if(p.hp<=0){p.hp=0;UIManager.open('dead')}return true}
 potion(type){let p=this.player;if(type==='hp'&&p.hppots>0&&p.hp<p.maxhp){p.hppots--;p.hp=Math.min(p.maxhp,p.hp+p.maxhp*.5);this.message('POÇÃO DE VIDA UTILIZADA');this.particles.burst(p.x,p.y,'#ff6b7f',18,{speed:80,lift:60})}if(type==='mp'&&p.mppots>0&&p.mp<p.maxmp){p.mppots--;p.mp=Math.min(p.maxmp,p.mp+p.maxmp*.5);this.message('POÇÃO DE MANA UTILIZADA');this.particles.burst(p.x,p.y,'#4fd5ff',18,{speed:80,lift:60})}}
 // ---- Enemy attacks ------------------------------------------------------------------------
@@ -1373,17 +1507,18 @@ enemyStrike(e,a){const dmg=e.damageOf(a),col=a.color||(e.red?'#ff4b57':'#ff8a6a'
  else if(a.kind==='super'){const pat=a.pattern;this.shake(10,.6);this.particles.burst(e.x,e.y-20,col,50,{speed:320});
   if(pat==='nova'||pat==='both')for(let i=0;i<(a.rings||1);i++)this.hazards.push({kind:'nova',x:e.x,y:e.y,r:10,max:a.radius,speed:a.radius/.75,delay:i*.4,damage:dmg,hit:new Set(),color:col,atk:a,owner:e});
   if(pat==='rain'||pat==='both'){const c=e.aimPos||this.player;for(let i=0;i<(a.count||6);i++){const r=i?rand(60,200):0,an=rand(0,Math.PI*2);this.hazards.push({kind:'blast',x:c.x+Math.cos(an)*r,y:c.y+Math.sin(an)*r*.8,r:a.blast||70,delay:.85+i*.09,max:.85+i*.09,damage:dmg,color:col,atk:a,owner:e,boom:0})}}
-  if(a.summon&&this.world.kind==='dungeon')for(let i=0;i<(a.summonCount||1);i++){const m=new Enemy(e.x+rand(-80,80),e.y+rand(-60,60),a.summon,Math.max(1,e.level-2),false,{red:e.red});this.enemies.push(m);this.particles.burst(m.x,m.y,'#a855f7',20)}}
+  if(a.summon&&this.world.kind==='dungeon')for(let i=0;i<(a.summonCount||1);i++){const def=MONSTER_TYPES[a.summon]||MONSTER_TYPES.goblin,sp=this.findFreeSpot(e.x,e.y,def.radius,e.radius+30,220,{avoid:this.enemies,sep:def.radius*2+6,los:true,angle:rand(0,Math.PI*2)});if(!sp)continue;const m=new Enemy(sp.x,sp.y,a.summon,Math.max(1,e.level-2),false,{red:e.red});m.alerted=true;m.home={x:e.home.x,y:e.home.y};this.enemies.push(m);this.particles.burst(m.x,m.y,'#a855f7',20)}}
 }
 updateCombatFX(dt){
  for(const pr of this.projectiles){pr.x+=pr.vx*dt;pr.y+=pr.vy*dt;pr.life-=dt;if(Math.random()<.7)this.particles.burst(pr.x,pr.y,pr.color,1,{speed:30,size:2,life:.5});
   if(this.world.kind==='dungeon'&&!this.world.walkable.some(r=>pr.x>=r.x&&pr.x<=r.x+r.w&&pr.y+16>=r.y&&pr.y+16<=r.y+r.h))pr.life=0;
+  if(pr.ally){for(const e of [...this.enemies])if(pr.life>0&&Math.hypot(e.x-pr.x,e.y-16-pr.y)<pr.size+e.radius*.6+6){this.hit(e,pr.damage,false,pr.owner,Math.atan2(pr.vy,pr.vx));pr.life=0;this.particles.burst(pr.x,pr.y,'#8ff0ff',12,{speed:160})}continue}
   for(const tg of this.enemyTargets())if(pr.life>0&&Math.hypot(tg.x-pr.x,tg.y-16-pr.y)<pr.size+14){this.enemyDamage(tg,pr.damage,pr.atk,pr.owner);pr.life=0;this.particles.burst(pr.x,pr.y,pr.color,12,{speed:160})}}
  this.projectiles=this.projectiles.filter(pr=>pr.life>0);
  for(const h of this.hazards){
   if(h.kind==='claw'){h.t-=dt;continue}
-  if(h.kind==='nova'){if(h.delay>0){h.delay-=dt;continue}h.r+=h.speed*dt;for(const tg of this.enemyTargets())if(!h.hit.has(tg)&&Math.abs(Math.hypot((tg.x-h.x),(tg.y-h.y)/.6)-h.r)<22){h.hit.add(tg);this.enemyDamage(tg,h.damage,h.atk,h.owner)}if(h.r>=h.max)h.done=true}
-  if(h.kind==='blast'){if(h.delay>0){h.delay-=dt;if(h.delay<=0){for(const tg of this.enemyTargets())if(Math.hypot(tg.x-h.x,(tg.y-h.y)/.7)<h.r)this.enemyDamage(tg,h.damage,h.atk,h.owner);this.particles.burst(h.x,h.y,h.color,26,{speed:260,lift:80});this.particles.ring(h.x,h.y,h.color,h.r*1.3,.4,5);this.shake(4,.15)}}else{h.boom+=dt;if(h.boom>.25)h.done=true}}
+  if(h.kind==='nova'){if(h.delay>0){h.delay-=dt;continue}h.r+=h.speed*dt;for(const tg of (h.ally?[...this.enemies]:this.enemyTargets()))if(!h.hit.has(tg)&&Math.abs(Math.hypot((tg.x-h.x),(tg.y-h.y)/.6)-h.r)<22){h.hit.add(tg);if(h.ally)this.hit(tg,h.damage,false,h.owner);else this.enemyDamage(tg,h.damage,h.atk,h.owner)}if(h.r>=h.max)h.done=true}
+  if(h.kind==='blast'){if(h.delay>0){h.delay-=dt;if(h.delay<=0){for(const tg of (h.ally?[...this.enemies]:this.enemyTargets()))if(Math.hypot(tg.x-h.x,(tg.y-h.y)/.7)<h.r){if(h.ally)this.hit(tg,h.damage,false,h.owner);else this.enemyDamage(tg,h.damage,h.atk,h.owner)}this.particles.burst(h.x,h.y,h.color,26,{speed:260,lift:80});this.particles.ring(h.x,h.y,h.color,h.r*1.3,.4,5);this.shake(4,.15)}}else{h.boom+=dt;if(h.boom>.25)h.done=true}}
  }
  this.hazards=this.hazards.filter(h=>!h.done&&!(h.kind==='claw'&&h.t<=0));
  for(const im of this.impacts)im.t-=dt;this.impacts=this.impacts.filter(im=>im.t>0);
@@ -1396,16 +1531,16 @@ update(dt){let p=this.player;this.time+=dt;if(this.panel){if(this.panel==='gate'
  if(p.dashTime>0){p.dashTime-=dt;dx=p.dashX;dy=p.dashY;n=1;this.particles.burst(p.x,p.y-14,'#27bfff',2,{angle:Math.atan2(-dy,-dx),spread:.6,speed:120,kind:'streak'})}
  let speed=p.dashTime>0?570:(140+p.stats.AGI*2.5)*(p.slow>0?.55:1);p.moving=!!n;if(n){p.moveAngle=Math.atan2(dy,dx);p.facing=dx||p.facing||1;this.moveActor(p,dx/n*speed*dt,dy/n*speed*dt)}
  let mx=this.input.mouse.x+this.camera.x,my=this.input.mouse.y+this.camera.y;if(this.input.mouse.x||this.input.mouse.y)p.angle=Math.atan2(my-p.y,mx-p.x);else if(n)p.angle=Math.atan2(dy,dx);
- this.animation.update(dt,p);if(this.input.mouse.down)this.attack();
+ this.animation.update(dt,p);if(this.world.kind==='dungeon')this.computeFog();if(this.input.mouse.down)this.attack();
  if(this.world.kind==='hub'){this.combatT=Math.max(0,(this.combatT||0)-dt);this.world.update(dt);this.gates.update(dt,this)}
  for(let e of [...this.enemies]){const x=e.x,y=e.y;e.update(dt,this);e.animMoving=Math.hypot(e.x-x,e.y-y)>.01;e.swing=Math.max(0,(e.swing||0)-dt)}
  for(let [i,s] of this.soldiers.entries()){const x=s.x,y=s.y;s.update(dt,this,i);s.animMoving=Math.hypot(s.x-x,s.y-y)>.01;s.swing=Math.max(0,(s.swing||0)-dt)}
  this.updateCombatFX(dt);this.corpses=this.corpses.filter(c=>(c.life-=dt)>0);this.particles.update(dt);this.floats=this.floats.filter(f=>(f.life-=dt)>0);for(let f of this.floats)f.y-=35*dt;this.shakeT-=dt;if(this.shakeT<=0)this.shakeMag=0;
  this.hudClock-=dt;this.updateHUD()}
 district(p){for(const z of CITY.zones)if(p.x>z.x&&p.x<z.x+z.w&&p.y>z.y&&p.y<z.y+z.h)return z.name;for(const a of CITY.spawnAreas)if(a.w<3000&&a.h<2000&&p.x>a.x&&p.x<a.x+a.w&&p.y>a.y&&p.y<a.y+a.h)return a.name;return p.y>RIVER.y?(p.x>4400?'YONGSAN LESTE':'YONGSAN'):p.y<700?'DISTRITO DAS GUILDAS':p.x>4400?'JONGNO':p.x>3040?'DISTRITO COMERCIAL':p.x<1000?'GANGNAM OESTE':'CENTRO DE SEUL'}
-updateHUD(){let p=this.player;$('#rank').textContent='RANK '+p.rank;$('#level').textContent='LV. '+String(p.level).padStart(2,'0');$('#hpbar').style.width=clamp(p.hp/p.maxhp*100,0,100)+'%';$('#mpbar').style.width=clamp(p.mp/p.maxmp*100,0,100)+'%';$('#hptext').textContent=`${Math.ceil(p.hp)}/${p.maxhp}`;$('#mptext').textContent=`${Math.ceil(p.mp)}/${p.maxmp}`;$('#hppots').textContent='HP ×'+p.hppots;$('#mppots').textContent='MP ×'+p.mppots;$('#questcount').textContent=Math.min(15,this.quest)+' / 15';$('#questfill').style.width=Math.min(100,this.quest/15*100)+'%';
+updateHUD(){let p=this.player;$('#rank').textContent='RANK '+p.rank;$('#level').textContent='LV. '+String(p.level).padStart(2,'0');$('#hpbar').style.width=clamp(p.hp/p.maxhp*100,0,100)+'%';$('#mpbar').style.width=clamp(p.mp/p.maxmp*100,0,100)+'%';$('#hptext').textContent=`${Math.ceil(p.hp)}/${p.maxhp}`;$('#mptext').textContent=`${Math.ceil(p.mp)}/${p.maxmp}`;$('#hppots').textContent='HP ×'+p.hppots;$('#mppots').textContent='MP ×'+p.mppots;$('#questcount').textContent=Math.min(15,this.quest)+' / 15';const ac=$('#armycount');if(ac)ac.textContent=`SOMBRAS ${this.army.length}/${armyCap(p)}`;$('#questfill').style.width=Math.min(100,this.quest/15*100)+'%';
  let hub=this.world.kind==='hub',zone=hub?this.district(p):'';$('#location').textContent=hub?zone:`DUNGEON · RANK ${this.world.rank}`;$('#locationSub').textContent=hub?(zone==='HUNTERS ASSOCIATION'?'SAFE ZONE · SEOUL':'CIDADE · SEOUL'):(this.redGate?'GATE VERMELHO · SEM SAÍDA':'SUBJUGUE O CHEFE');$('#zoneLabel').textContent=hub?zone:'DUNGEON RANK '+this.world.rank;
- let boss=this.enemies.find(e=>e.boss);$('#bossbar').classList.toggle('hidden',!boss||dist(p,boss)>520);if(boss){$('#bossname').textContent=boss.name;$('#bossfill').style.width=Math.max(0,boss.hp/boss.maxhp*100)+'%';$('#bossskill').textContent=boss.state==='windup'?'⚠ '+boss.current.name:''}
+ let boss=this.enemies.find(e=>e.boss);$('#bossbar').classList.toggle('hidden',!boss||dist(p,boss)>520||!(this.fogVisible(boss)||boss.alerted));if(boss){$('#bossname').textContent=boss.name;$('#bossfill').style.width=Math.max(0,boss.hp/boss.maxhp*100)+'%';$('#bossskill').textContent=boss.state==='windup'?'⚠ '+boss.current.name:''}
  let hint='';if(hub){const gate=this.gates.nearest(p);if(gate)hint=`[ E ] ENTRAR NO GATE ${gate.red?'VERMELHO':'AZUL'} · RANK ${gate.rank}`;else if(dist(p,HUB.merchant)<100)hint='[ E ] FALAR COM MERCADOR';else if(dist(p,HUB.healer)<100)hint='[ E ] CURAR HP E MP'}else if(this.corpses.some(c=>dist(c,p)<75))hint='[ E ] ERGA-SE';else if(this.bossDefeated&&!this.chest&&dist(p,{x:1500,y:600})<90)hint='[ E ] ABRIR BAÚ';else if(this.chest&&dist(p,{x:1560,y:650})<110)hint='[ E ] RETORNAR À CIDADE';$('#interact').classList.toggle('hidden',!hint);$('#interact').textContent=hint;
  if(this.hudClock<=0){this.hudClock=.25;const list=hub?[...this.gates.list].sort((a,b)=>dist(a,p)-dist(b,p)):[];$('#gatecount').textContent=hub?String(list.length):'—';
   $('#gateList').innerHTML=!hub?'<p class="gate-empty">Rastreamento indisponível dentro da dungeon.</p>':list.length?list.map(g=>{const a=Math.atan2(g.y-p.y,g.x-p.x),arrow='→↘↓↙←↖↑↗'[((Math.round(a/(Math.PI/4))%8)+8)%8];return `<div class="gate-row ${g.red?'red':'blue'} ${g.life<GATE_RULES.warnAt?'unstable':''}"><i></i><b>RANK ${g.rank}</b><span>${g.forming>0?'FORMANDO…':fmtTime(g.life)}</span><small>${g.district} · ${Math.round(dist(g,p)/10)}m ${arrow}</small></div>`}).join(''):'<p class="gate-empty">Nenhum gate ativo. Aguarde o próximo alerta…</p>'}}
@@ -1419,6 +1554,21 @@ drawEnemy(e){const c=ctx,moving=e.animMoving,pose=e.state==='windup'?'windup':(e
  c.restore();
  const top=e.y-f.ay-8,w=Math.max(44,e.radius*2.4);c.fillStyle='#061019';c.fillRect(e.x-w/2-1,top-1,w+2,6);c.fillStyle='#4a1f28';c.fillRect(e.x-w/2,top,w,4);c.fillStyle=e.boss?'#fa6d7a':e.red?'#ff3b4f':'#dd596a';c.fillRect(e.x-w/2,top,w*Math.max(0,e.hp/e.maxhp),4);c.fillStyle='#ffb8b1';c.fillRect(e.x-w/2,top,w*Math.max(0,e.hp/e.maxhp),1);
  if(e.stun>0){for(let i=0;i<3;i++){const a=this.time*5+i*2.1;c.fillStyle='#ffe16c';c.fillRect(e.x+Math.cos(a)*14-2,top-10+Math.sin(a)*4,4,4)}}}
+// Shadow soldiers: the original monster sprite in the shadow palette, a violet aura and a mini-HUD
+// (level + live HP bar) floating above each one. Regenerating shadows show a recharge ring.
+drawShadow(a){const c=ctx;
+ if(a.state==='REGENERATE'){c.save();c.globalAlpha=.6;c.fillStyle='#160b27';c.beginPath();c.ellipse(a.x,a.y+6,18,7,0,0,7);c.fill();c.strokeStyle='#8a4ad8';c.lineWidth=2;c.beginPath();c.arc(a.x,a.y-12,9,-Math.PI/2,-Math.PI/2+Math.PI*2*(1-Math.max(0,a.regen)/ARMY_RULES.regen));c.stroke();c.restore();this.drawShadowHUD(a,a.y-34);return}
+ const ph=a.act&&a.act.phase,pose=ph==='windup'?'windup':(a.swing>0||ph==='lunge')?'strike':a.animMoving?'move'+(Math.floor(a.animT*(a.speed/12))%4):'idle'+(Math.floor(a.animT*2)%2),f=this.sprites.shadowMonster(a.art,pose);
+ c.save();c.translate(Math.round(a.x),Math.round(a.y));c.fillStyle='#14072acc';c.beginPath();c.ellipse(0,4,a.radius*1.15,a.radius*.42,0,0,7);c.fill();
+ c.save();c.globalCompositeOperation='lighter';c.globalAlpha=.25+.12*Math.sin(this.time*5+a.slot);c.strokeStyle='#7b2cff';c.lineWidth=2;c.beginPath();c.ellipse(0,4,a.radius*1.3+Math.sin(this.time*5+a.slot)*2,a.radius*.5,0,0,7);c.stroke();c.restore();
+ if(ph==='windup'){const k=1-a.act.t/Math.max(.01,a.act.a.windup*.6);c.scale(1+.06*k,1-.06*k)}
+ if(a.facing<0)c.scale(-1,1);c.shadowColor='#a33cff';c.shadowBlur=14;c.drawImage(f.img,-f.ax,-f.ay);c.shadowBlur=0;
+ if(a.hurtT>0){c.globalCompositeOperation='lighter';c.globalAlpha=.55;c.drawImage(f.img,-f.ax,-f.ay)}c.restore();
+ if(Math.random()<.15)this.particles.burst(a.x+rand(-.6,.6)*a.radius,a.y-rand(0,f.ay*.8),Math.random()<.5?'#3b1466':'#7b2cff',1,{speed:20,lift:40,kind:'sq'});
+ this.drawShadowHUD(a,a.y-f.ay+(f.top||0)-8)}
+drawShadowHUD(a,top){const c=ctx,w=Math.round(Math.max(40,Math.min(72,a.radius*2.2))),x=Math.round(a.x-w/2),y=Math.round(top),k=clamp(a.hp/a.maxhp,0,1);
+ c.save();c.globalAlpha=1;c.fillStyle='#05020bcc';c.fillRect(x-1,y-1,w+2,6);c.fillStyle='#2a1440';c.fillRect(x,y,w,4);c.fillStyle=a.state==='REGENERATE'?'#4a3a66':k<.3?'#ff5ad0':'#9b5bff';c.fillRect(x,y,w*k,4);c.fillStyle='#8ff0ff';c.fillRect(x,y,w*k,1);
+ const label=`LV ${a.level}${a.boss?' ★':''}`;c.font='bold 10px monospace';c.textAlign='center';c.lineWidth=3;c.strokeStyle='#05020b';c.strokeText(label,a.x,y-3);c.fillStyle=a.boss?'#ffd27a':'#d7b8ff';c.fillText(label,a.x,y-3);c.textAlign='left';c.restore()}
 drawTelegraph(e){const a=e.current,k=1-e.stateT/a.windup,c=ctx;c.save();c.globalAlpha=.18+.3*k;c.fillStyle=a.kind==='super'?(a.color||'#ff3b4f'):'#ff3b4f';c.strokeStyle='#ff6a7a';c.lineWidth=2;
  if(a.kind==='melee'){c.beginPath();c.moveTo(e.x,e.y);c.arc(e.x,e.y,a.range,e.aim-a.arc,e.aim+a.arc);c.closePath();c.fill();c.globalAlpha=.6;c.beginPath();c.arc(e.x,e.y,a.range*k,e.aim-a.arc,e.aim+a.arc);c.stroke()}
  else if(a.kind==='slam'){c.beginPath();c.ellipse(e.x,e.y,a.radius,a.radius*.6,0,0,7);c.fill();c.globalAlpha=.7;c.beginPath();c.ellipse(e.x,e.y,a.radius*k,a.radius*.6*k,0,0,7);c.stroke()}
@@ -1440,18 +1590,18 @@ draw(){ctx.clearRect(0,0,canvas.width,canvas.height);if(!this.started){ctx.fillS
  ctx.save();ctx.translate(Math.round(-this.camera.x+sx),Math.round(-this.camera.y+sy));const view={x:this.camera.x,y:this.camera.y,w:canvas.width,h:canvas.height};this.world.draw(ctx,this.time,view);if(this.world.kind==='hub')this.gates.draw(ctx,this.time,this.world);this.drawAtmosphere(ctx);
  for(let c of this.corpses){ctx.save();ctx.globalAlpha=Math.min(1,c.life);ctx.fillStyle='#160b27';ctx.beginPath();ctx.ellipse(c.x,c.y+10,24,10,0,0,7);ctx.fill();ctx.shadowColor='#a855f7';ctx.shadowBlur=16;ctx.strokeStyle='#9f4de0';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(c.x,c.y+10,20+Math.sin(this.time*4)*2,7,0,0,7);ctx.stroke();for(let i=0;i<7;i++){let phase=(this.time*16+i*7)%30;ctx.fillStyle=i%2?'#b761f5':'#65238d';ctx.globalAlpha=Math.min(1,c.life)*(1-phase/35);ctx.fillRect(c.x+Math.sin(this.time*3+i*2)*12,c.y+8-phase,3+i%2,4+i%3)}ctx.restore()}
  if(this.bossDefeated&&!this.chest){ctx.fillStyle='#3b211a';ctx.fillRect(1477,580,46,32);ctx.fillStyle='#e9b950';ctx.fillRect(1477,586,46,5);ctx.fillRect(1497,582,5,29);ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=.3+.2*Math.sin(this.time*4);ctx.fillStyle='#ffd27a';ctx.beginPath();ctx.arc(1500,596,40,0,7);ctx.fill();ctx.restore()}
- for(const e of this.enemies)if(e.state==='windup')this.drawTelegraph(e);
+ for(const e of this.enemies)if(e.state==='windup'&&this.fogVisible(e))this.drawTelegraph(e);
  this.animation.drawGhosts(ctx);this.animation.draw(ctx,'under');
- let actors=[...this.enemies,...this.soldiers,p,...(this.world.npcs?this.world.npcs.visible(view):[])].sort((a,b)=>a.y-b.y);
+ let actors=[...this.enemies.filter(e=>this.fogVisible(e)),...this.soldiers,p,...(this.world.npcs?this.world.npcs.visible(view):[])].sort((a,b)=>a.y-b.y);
  for(let a of actors){if(a.isCityNPC){a.draw(ctx,this);continue}if(a===p){
    // The hero is always rendered at full opacity (no post-dash transparency).
    ctx.globalAlpha=1;ctx.fillStyle='#0009';ctx.beginPath();ctx.ellipse(a.x,a.y+9,15,5,0,0,7);ctx.fill();
    if(p.stealth>0){ctx.save();ctx.globalCompositeOperation='lighter';ctx.strokeStyle='#5a6bff';ctx.globalAlpha=.45*Math.min(1,p.stealth);ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(a.x,a.y+9,20+Math.sin(this.time*10)*2,7,0,0,7);ctx.stroke();ctx.restore()}
    if(p.poison>0||p.slow>0){ctx.save();ctx.globalAlpha=.6;ctx.fillStyle=p.poison>0?'#7dff5a':'#bff0ff';ctx.fillRect(a.x-12,a.y-58,24,2);ctx.restore()}
    ctx.drawImage(this.animation.frame(p),Math.round(a.x-32),Math.round(a.y-50),64,64);continue}
-  if(this.soldiers.includes(a)){if(a.state==='REGENERATE')continue;const pose=a.swing>0?'strike':a.animMoving?'move'+(Math.floor(a.animT*9)%4):'idle'+(Math.floor(a.animT*2)%2),f=this.sprites.monster('shadow',pose);ctx.save();ctx.translate(Math.round(a.x),Math.round(a.y));ctx.fillStyle='#1a0a2a99';ctx.beginPath();ctx.ellipse(0,4,16,6,0,0,7);ctx.fill();if(a.facing<0)ctx.scale(-1,1);ctx.shadowColor='#a33cff';ctx.shadowBlur=14;ctx.drawImage(f.img,-f.ax,-f.ay);ctx.restore();continue}
+  if(a.isShadow){this.drawShadow(a);continue}
   this.drawEnemy(a)}
- if(this.world.kind==='hub')this.world.cityTop(ctx,this.time,view);this.drawHazards();this.animation.draw(ctx);this.drawImpacts();this.particles.draw(ctx);
+ if(this.world.kind==='hub')this.world.cityTop(ctx,this.time,view);this.drawHazards();this.animation.draw(ctx);this.drawImpacts();this.particles.draw(ctx);this.drawFog(ctx);
  for(let f of this.floats){ctx.fillStyle=f.color;ctx.font=`bold ${f.size||16}px monospace`;ctx.lineWidth=3;ctx.strokeStyle='#07131b';ctx.strokeText(f.text,f.x,f.y);ctx.fillText(f.text,f.x,f.y)}
  ctx.restore();if(this.world.kind==='hub')this.drawGateArrows();this.drawMap()}
 drawGateArrows(){const p=this.player,W=canvas.width,H=canvas.height;for(const g of this.gates.list){const sx=g.x-this.camera.x,sy=g.y-this.camera.y;if(sx>0&&sx<W&&sy>0&&sy<H)continue;const a=Math.atan2(sy-H/2,sx-W/2),m=60,ex=clamp(W/2+Math.cos(a)*W,m,W-m),ey=clamp(H/2+Math.sin(a)*H,m+90,H-m-90),col=g.red?'#ff4b57':'#3bcfff';
@@ -1459,7 +1609,10 @@ drawGateArrows(){const p=this.player,W=canvas.width,H=canvas.height;for(const g 
 drawAtmosphere(c){
  const dungeon=this.world.kind==='dungeon',snow=dungeon&&this.world.rank==='A',lava=dungeon&&this.world.rank==='S';
  c.save();c.globalAlpha=.32;c.fillStyle=snow?'#e8fbff':lava?'#ff9763':dungeon?'#78c4cc':'#b3d2c4';
- const ox=this.camera.x,oy=this.camera.y,W=canvas.width,H=canvas.height;for(let i=0;i<60;i++){const x=(i*127+Math.sin(this.time*.35+i)*16)%W,y=(i*173+(snow?this.time*30:-this.time*7)*(1+i%3))%H;c.fillRect(ox+x,oy+(y+H)%H,i%7===0?3:2,i%7===0?3:2)}
+ // Motes are anchored to world cells (not to the screen), so they no longer slide along with the
+ // camera/player; they drift inside their cell (snow falls, dust rises) and wrap seamlessly.
+ const ox=this.camera.x,oy=this.camera.y,W=canvas.width,H=canvas.height,C=300,drift=snow?30:-7;
+ for(let gx=Math.floor(ox/C);gx*C<ox+W;gx++)for(let gy=Math.floor(oy/C);gy*C<oy+H;gy++)for(let i=0;i<3;i++){const n=gx*7+gy*13+i,x=gx*C+hash2(gx*3+i,gy)*C+Math.sin(this.time*.35+n)*16,y=gy*C+(((hash2(gx,gy*3+i)*C+this.time*drift*(1+i))%C)+C)%C,sz=(n%7===0)?3:2;c.fillRect(x,y,sz,sz)}
  c.restore();
 }
 drawMap(){let m=mapctx,w=this.world,sx=150/w.w,sy=100/w.h,X=x=>x*sx+5,Y=y=>y*sy+5;m.clearRect(0,0,160,112);m.fillStyle='#071825';m.fillRect(0,0,160,112);m.strokeStyle='#143747';for(let x=20;x<160;x+=20){m.beginPath();m.moveTo(x,0);m.lineTo(x,112);m.stroke()}for(let y=20;y<112;y+=20){m.beginPath();m.moveTo(0,y);m.lineTo(160,y);m.stroke()}m.strokeStyle='#1c5669';m.strokeRect(4,4,152,104);
@@ -1467,7 +1620,11 @@ drawMap(){let m=mapctx,w=this.world,sx=150/w.w,sy=100/w.h,X=x=>x*sx+5,Y=y=>y*sy+
   m.fillStyle='#e0b84a';m.fillRect(X(HUB.merchant.x)-1,Y(HUB.merchant.y)-1,3,3);m.fillStyle='#5affb0';m.fillRect(X(HUB.healer.x)-1,Y(HUB.healer.y)-1,3,3);
   for(const g of this.gates.list){const blink=g.forming>0||g.life<GATE_RULES.warnAt?Math.sin(this.time*12)>0:true;if(!blink)continue;m.fillStyle=g.red?'#ff5363':'#54dfff';m.shadowColor=m.fillStyle;m.shadowBlur=6;m.fillRect(X(g.x)-2,Y(g.y)-2,5,5);m.shadowBlur=0}
   m.strokeStyle='#a7fcff55';m.strokeRect(X(this.camera.x),Y(this.camera.y),canvas.width*sx,canvas.height*sy)}
- else{for(const r of w.rooms)if(dist(this.player,{x:r.cx,y:r.cy})<260+this.player.stats.PER*5)r.seen=true;m.fillStyle='#17465b';for(const r of w.rooms.filter(r=>r.seen))m.fillRect(X(r.x),Y(r.y),r.w*sx,r.h*sy);m.fillStyle='#32748a';for(const r of w.corridors)if(w.rooms.some(room=>room.seen&&dist({x:r.x+r.w/2,y:r.y+r.h/2},{x:room.cx,y:room.cy})<320))m.fillRect(X(r.x),Y(r.y),r.w*sx,r.h*sy);m.fillStyle='#f16978';for(let e of this.enemies)if(dist(e,this.player)<260+this.player.stats.PER*5)m.fillRect(X(e.x),Y(e.y),e.boss?4:2,e.boss?4:2)}
+ else{// Minimap follows the fog of war: only explored rooms, the corridors leaving them and monsters
+  // the player can currently see (lit room, or adjacent rooms with high Perception).
+  const f=this.fog||this.computeFog();m.fillStyle='#32748a';for(const r of w.corridors)if(w.rooms[r.a].seen||w.rooms[r.b].seen)m.fillRect(X(r.gap.x),Y(r.gap.y),Math.max(1,r.gap.w*sx),Math.max(1,r.gap.h*sy));
+  for(const r of w.rooms.filter(r=>r.seen)){const z='r'+r.id;m.fillStyle=f.lit.has(z)?'#2a7d98':f.near.has(z)?'#1f5f78':'#17465b';m.fillRect(X(r.x),Y(r.y),r.w*sx,r.h*sy)}
+  m.fillStyle='#f16978';for(let e of this.enemies)if(this.fogVisible(e))m.fillRect(X(e.x),Y(e.y),e.boss?4:2,e.boss?4:2);m.fillStyle='#b46bff';for(const s of this.soldiers)if(s.state!=='REGENERATE')m.fillRect(X(s.x),Y(s.y),2,2)}
  m.fillStyle='#a7fcff';m.shadowColor='#58faff';m.shadowBlur=7;m.fillRect(X(this.player.x)-2,Y(this.player.y)-2,5,5);m.shadowBlur=0}
 loop(t){let dt=Math.min(.04,(t-this.last)/1000||0);this.last=t;this.sprites.beginFrame();if(this.started)this.update(dt);this.draw();this.sprites.warm(this.started?(dt>.02?1:3):8);requestAnimationFrame(t=>this.loop(t))}}
 const game=new GameEngine();game.floats=[];$('#accept').onclick=()=>game.start(null);if(SaveSystem.load())$('#continue').classList.remove('hidden');$('#continue').onclick=()=>game.start(SaveSystem.load());document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>{if(game.started)UIManager.open(b.dataset.panel)});$('#modal').addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;let d=b.dataset,p=game.player;if(d.do==='close'||d.do==='resume')UIManager.close();else if(d.do==='save'){SaveSystem.save(game);UIManager.close();game.message('PROGRESSO SALVO')}else if(d.do==='hub'||d.do==='revive'){p.hp=p.maxhp;p.mp=p.maxmp;game.returnHub()}else if(d.do==='summon'){game.toggleArmy();UIManager.open('army')}else if(d.stat&&p.points>0){p.stats[d.stat]++;p.points--;UIManager.open('status')}else if(d.dismiss!==undefined){game.army.splice(+d.dismiss,1);game.soldiers=[];game.summoned=false;UIManager.open('army')}else if(d.equip!==undefined){let i=+d.equip;if(p.owned.includes(i))p.weapon=i;UIManager.open('inventory')}else if(d.buy!==undefined){let i=+d.buy,w=weapons[i];if(p.owned.includes(i)){p.weapon=i}else if(p.gold>=w.price){p.gold-=w.price;p.owned.push(i);p.weapon=i;game.message('ARMA ADQUIRIDA')}UIManager.open('shop')}else if(d.potion){if(p.gold>=40){p.gold-=40;if(d.potion==='hp')p.hppots++;else p.mppots++}UIManager.open('shop')}else if(d.gate){const gate=game.selectedGate;if(gate)game.gates.remove(gate);game.selectedGate=null;game.enter(d.gate,d.red==='1')}if(game.started)SaveSystem.save(game)});
