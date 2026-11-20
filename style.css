@@ -240,3 +240,10 @@ body.touch .army-drain{font-size:10px;margin-top:3px}
 .mana-tag{display:block;font-size:11px;margin-top:2px}
 body.touch .army-drain{gap:5px;padding:1px 4px}
 body.touch .army-drain em{display:none}
+
+/* ---- Dungeon themes (v7) ---- */
+.gate-theme{border-left:3px solid var(--th,#3bcfff);background:linear-gradient(90deg,color-mix(in srgb,var(--th,#3bcfff) 14%,transparent),transparent);padding:8px 10px;margin:8px 0 10px;border-radius:2px}
+.gate-theme small{display:block;font-size:10px;letter-spacing:.14em;opacity:.7}
+.gate-theme b{display:block;color:var(--th,#3bcfff);letter-spacing:.06em;margin:2px 0 4px}
+.gate-theme p{margin:0;font-size:12px;line-height:1.4;opacity:.85}
+.gate-theme em{display:block;margin-top:5px;font-style:normal;font-size:11px;color:#ffb35a;letter-spacing:.05em}

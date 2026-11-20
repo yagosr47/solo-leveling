@@ -236,4 +236,48 @@ run('game.update(1/60)');
 assert.ok(Math.abs(run('game.player.angle') - Math.atan2(40, 60)) < 0.05, 'touch attack faces the auto-aim target');
 assert.ok(run('game.player.cool') > 0, 'holding the attack button swings the weapon');
 run('game.input.touchAttack=false;game.input.touchMode=false');
-console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army, army mana and mobile touch controls.');
+// Dungeon themes: 18 maps (3 per rank), safe spawns clear of solid props and hazards, terrain effects.
+assert.equal(run('ALL_THEMES.length'), 18, '18 dungeon themes');
+assert.equal(run("RANKS.every(r=>DUNGEON_THEMES[r]&&DUNGEON_THEMES[r].length===3)"), true, '3 themes per rank E..S');
+assert.equal(run('new Set(ALL_THEMES.map(t=>t.id)).size'), 18, 'unique theme ids');
+assert.equal(run("ALL_THEMES.every(t=>t.mon.every(m=>MONSTER_TYPES[m])&&t.fog&&t.pal&&t.name)"), true, 'themes reference valid monsters');
+assert.equal(run("['E','D'].every(r=>DUNGEON_THEMES[r].every(t=>t.dark>=.5))"), true, 'E/D maps use the layered darkness');
+for (const th of run('JSON.stringify(ALL_THEMES.map(t=>[t.id,RANKS.find(r=>DUNGEON_THEMES[r].includes(t))]))').length ? JSON.parse(run('JSON.stringify(ALL_THEMES.map(t=>[t.id,RANKS.find(r=>DUNGEON_THEMES[r].includes(t))]))')) : []) {
+  const [id, rank] = th;
+  run(`game.enter('${rank}',false,'${id}')`);
+  assert.equal(run('game.world.theme.id'), id, `${id}: theme applied`);
+  assert.ok(run('!!game.world.wallLayer&&Array.isArray(game.world.solids)&&Array.isArray(game.world.zones)&&game.world.lights.length>=0'), `${id}: static layer baked`);
+  assert.ok(run('game.isWalkable(game.player.x,game.player.y,14)'), `${id}: hunter spawns on a walkable spot`);
+  assert.equal(run('game.world.terrainAt(game.player.x,game.player.y)'), null, `${id}: entrance is free of hazards`);
+  assert.ok(run('game.enemies.length') >= 15, `${id}: monsters spawned`);
+  assert.equal(run(`game.enemies.every(e=>!game.world.blocked(e.x,e.y,8)&&game.world.walkable.some(r=>e.x>=r.x&&e.x<=r.x+r.w&&e.y>=r.y&&e.y<=r.y+r.h))`), true, `${id}: no monster inside a solid prop`);
+  assert.equal(run(`game.enemies.every(e=>game.world.theme.mon.includes(e.type)||e.boss)`), true, `${id}: themed monster roster`);
+  run('game.player.dashTime=0;game.draw()');
+}
+// Solid props block movement.
+run(`game.enter('E',false,'metro');globalThis.__s=game.world.solids.find(s=>s.w>20&&s.h>14);`);
+assert.ok(run('!!__s'), 'metro has solid cover');
+assert.equal(run('game.isWalkable(__s.x+__s.w/2,__s.y+__s.h/2,12)'), false, 'solid props are not walkable');
+// Slow terrain (swamp water) reduces displacement.
+run(`game.enter('D',false,'swamp');globalThis.__z=game.world.zones.find(z=>z.kind==='slow');`);
+assert.ok(run('!!__z&&__z.mult<1'), 'swamp has slowing water');
+const slowMove = code => run(`(()=>{const p=game.player;${code};p.dashTime=0;const x0=p.x;game.moveActor(p,6,0);return p.x-x0})()`);
+const outside = slowMove(`const r=game.world.rooms[3];p.x=r.cx;p.y=r.cy`);
+const inside = slowMove(`p.x=__z.x;p.y=__z.y;game.world.solids=[]`);
+assert.ok(inside < outside && inside > 0, 'murky water slows the hunter');
+// Burn terrain damages over time and can kill.
+run(`game.enter('B',false,'volcanic');globalThis.__z=game.world.zones.find(z=>z.kind==='burn');(()=>{const p=game.player;p.x=__z.x;p.y=__z.y;p.dashTime=0;p.burnT=0;globalThis.__hp=p.hp=p.maxhp})()`);
+assert.ok(run('!!__z'), 'volcanic map has lava');
+run('game.terrainEffects(game.player,1/60)');
+assert.ok(run('game.player.hp') < run('__hp'), 'lava burns the hunter');
+run(`game.player.hp=1;game.player.burnT=0;game.terrainEffects(game.player,1/60)`);
+assert.equal(run('UIManager.open&&game.player.hp'), 0, 'lava can kill');
+run('UIManager.close();game.player.hp=game.player.maxhp');
+// Ice keeps momentum (the hunter keeps sliding after releasing the keys).
+run(`game.enter('B',false,'glacial');globalThis.__z=game.world.zones.find(z=>z.kind==='ice');(()=>{const p=game.player;game.enemies=[];game.world.solids=[];p.x=__z.x;p.y=__z.y;p.ivx=200;p.ivy=0;p.dashTime=0;game.input.keys={};game.input.touchMode=false;game.input.stick={x:0,y:0,mag:0};globalThis.__x0=p.x;game.update(1/30)})()`);
+assert.ok(run('game.player.x') > run('__x0') + 2, 'ice keeps the hunter sliding');
+// Gates carry a theme that the gate panel shows and passes to enter().
+run('game.returnHub();game.gates.list=[]');
+assert.equal(run(`(()=>{const g=game.gates.spawn(game,{x:HUB.spawn.x+40,y:HUB.spawn.y,instant:true,rank:'C',theme:'sunken'});return g&&g.theme})()`), 'sunken', 'gate keeps its theme');
+assert.equal(run(`(()=>{const g=game.gates.spawn(game,{x:HUB.spawn.x-40,y:HUB.spawn.y,instant:true,rank:'S'});return DUNGEON_THEMES.S.some(t=>t.id===g.theme)})()`), true, 'gates roll a theme of their rank');
+console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army, army mana, mobile touch controls and 18 dungeon themes.');
