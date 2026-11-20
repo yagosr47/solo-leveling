@@ -20,6 +20,24 @@ No hub, aproxime-se dos portais e pressione E para escolher uma dungeon. Derrote
 - O painel de identidade mostra as sombras ativas, o tempo invocado e o gasto em MP/s. O mesmo valor aparece na hotbar e no botão de toque.
 - O painel Sombras (V) detalha o custo de invocação, a manutenção, o saldo com a regeneração, o tempo ativo e o custo de cada sombra.
 
+## Mapas de dungeon (18 temas)
+
+Cada gate sorteia um dos **3 mapas do seu rank**. O tema aparece no painel do gate (com descrição e perigos) e no HUD dentro da dungeon. Cada mapa tem piso, paredes, fundo, objetos sólidos que servem de cobertura, perigos de terreno, fontes de luz, partículas de ambiente e monstros próprios.
+
+| Rank | Mapas |
+|---|---|
+| **E** | Estação de Metrô Abandonada · Mina de Mana Subterrânea · Templo de Cartenon (dungeon dupla) |
+| **D** | Pântano dos Homens-Lagarto · Catacumbas do Cavaleiro Caído · Ruínas da Floresta de Névoa |
+| **C** | Covil da Aranha Gigante · Deserto da Centopeia Gigante · Ruínas de Mana Submersas |
+| **B** | Sala do Trono de Igris · Floresta Glacial do Gate Vermelho · Fortaleza Vulcânica dos Orcs |
+| **A** | Cidadela de Kargalgan · Cidade em Chamas do Castelo Demoníaco · Topo da Torre Demoníaca (arena de Baran) |
+| **S** | Formigueiro de Jeju · Gate Gigante de Tóquio · Fenda Dimensional (guerra dos Monarcas) |
+
+- **Iluminação em camadas:** nos ranks E/D a dungeon fica no escuro. Há um círculo de luz suave em volta do caçador (maior com Percepção) e em volta de tochas, cristais, velas e lâmpadas fluorescentes que piscam. As sombras emitem uma aura fraca. Os mapas iniciais evitam fundos roxos, para que o exército (preto + neon azul/roxo) se destaque.
+- **Terreno:** água turva, teias e areia movediça deixam o movimento lento; lagos congelados fazem deslizar; lava e fogo causam dano contínuo (o dash atravessa sem dano); secreções envenenam. Um aviso aparece na primeira vez que você pisa em cada perigo.
+- **Cobertura:** vagões, sarcófagos, armaduras, pilares, cristais e outros objetos bloqueiam a passagem. Monstros e o caçador nunca nascem dentro deles nem sobre perigos.
+- A sala de entrada fica sempre livre de perigos. A camada estática do mapa é pré-renderizada uma vez, e o modo leve reduz partículas e luzes.
+
 As dungeons são geradas com salas conectadas e corredores; o minimapa revela as salas próximas. As sombras podem entrar em regeneração e consomem mana para retornar. A missão de treinamento é renovada por data local.
 
 ## Celular e tablet
