@@ -304,8 +304,8 @@ function shadowize(g,art){const eyes=new Set([art.eye,'#ffffff',art.orb].filter(
 const hash2=(a,b)=>{let h=Math.imul(a|0,374761393)+Math.imul(b|0,668265263)|0;h=Math.imul(h^h>>>13,1274126177);return ((h^h>>>16)>>>0)/4294967296};
 // Ring/spiral search for a free spot around (cx,cy). `ok(x,y)` decides; candidates fan out from
 // `angle` (alternating sides), ring by ring, from minR to maxR. Returns {x,y} or null.
-function spiralSearch(cx,cy,ok,{minR=0,maxR=240,rad=12,step=0,angle=0,flat=1}={}){if(minR<=0&&ok(cx,cy))return {x:cx,y:cy};const st=step||Math.max(14,rad*1.5);
- for(let r=Math.max(st,minR);r<=maxR;r+=st){const n=Math.max(8,Math.floor(Math.PI*2*r/Math.max(10,rad*2)));for(let i=0;i<n;i++){const a=angle+(i%2?1:-1)*Math.ceil(i/2)*Math.PI*2/n,x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r*flat;if(ok(x,y))return {x,y}}}return null}
+function spiralSearch(cx,cy,ok,{minR=0,maxR=240,rad=12,step=0,angle=0,flat=1,land=false}={}){if(minR<=0&&ok(cx,cy))return {x:cx,y:cy};const st=step||Math.max(14,rad*1.5);
+ for(let r=Math.max(st,minR);r<=maxR;r+=st){const n=Math.max(8,Math.floor(Math.PI*2*r/Math.max(10,rad*2)));for(let i=0;i<n;i++){const a=angle+(i%2?1:-1)*Math.ceil(i/2)*Math.PI*2/n,x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r*flat;if(land){const t=(game&&game.world&&game.world.terrainAt)?game.world.terrainAt(x,y):(typeof w!=='undefined'&&w&&w.terrainAt?w.terrainAt(x,y):null);if(t&&t.kind==='slow')continue}if(ok(x,y))return {x,y}}}return null}
 const seeded=s=>()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return ((t^t>>>14)>>>0)/4294967296};
 // People rig (civilians and hunters). Same body-space projection as the hero, so every NPC has
 // 8 real facings, a 6-frame walk, a 6-frame run, idle breathing, talking gestures, a phone pose
@@ -2058,41 +2058,56 @@ const THIS_CITY2=(()=>{
  const buildings=[],solids=[],lamps=[],palms=[],boats=[],stalls=[];
  const PALETTE=['#3a6a8a','#8a5a3a','#4a7a5a','#6a4a7a','#a8763a','#2a5a6a','#7a3a4a'];
  const B=(x,y,w,h,col,name)=>{buildings.push({x,y,w,h,color:col,name,roof:Math.min(40,Math.round(h*.3))});solids.push({x,y,w,h:h-6})};
- // quarteirões
- for(let row=0;row<3;row++)for(let col=0;col<4;col++){const x=140+col*760,y=180+row*520,w=520,h=380;
-  for(let i=0;i<2;i++){const bw=200+rnd()*180,bh=h-80;B(x+20+i*(bw+30),y+20,bw,bh,pick(PALETTE),pick(NAMES.shop))}
-  lamps.push({x:x+w/2,y:y-10});palms.push({x:x+40,y:y+h+30,s:.9});palms.push({x:x+w-40,y:y+h+40,s:.8})}
- // orla: praia e mar
- for(let i=0;i<26;i++)palms.push({x:120+rnd()*(W-240),y:1760+rnd()*120,s:.9+rnd()*.5});
- for(let i=0;i<7;i++)boats.push({x:300+rnd()*(W-600),y:1980+rnd()*120,a:rnd()*Math.PI});
- for(let i=0;i<8;i++)stalls.push({x:180+i*360,y:1690,w:90,h:34,color:pick(['#c23a3a','#d8a020','#2a8a6a','#3a6ad8']),food:pick(['PEIXE','TTEOK','HOTTEOK','ESPETOS'])});
+ // Malha urbana: 5 ruas verticais (120 px) e 3 ruas horizontais (110 px) deixam 4x3 quarteirões
+ // de 640x410. Os prédios ficam inteiramente dentro do quarteirão, sem invadir rua nem o vizinho.
+ // O quarteirão (col 2, row 2) é a Praça de Busan — área aberta com fonte, spawn e portal.
+ const PLAZA={x:1640,y:1300,w:640,h:410},PC={x:1960,y:1505};
+ for(let row=0;row<3;row++)for(let col=0;col<4;col++){
+  const bx=120+col*760,by=260+row*520,bw=640,bh=410;
+  if(col===2&&row===2)continue; // praça
+  const w2=(bw-36-20)/2;
+  for(let i=0;i<2;i++)B(bx+18+i*(w2+20),by+18,w2,bh-36,pick(PALETTE),pick(NAMES.shop));
+  lamps.push({x:bx-8,y:by-8});lamps.push({x:bx+bw+8,y:by+bh+8});
+  palms.push({x:bx+26,y:by+bh-24,s:.85});palms.push({x:bx+bw-30,y:by+26,s:.75})}
+ // orla: praia e mar (a água é terreno lento, não uma parede invisível)
+ for(let i=0;i<30;i++)palms.push({x:100+rnd()*(W-200),y:1762+rnd()*110,s:.9+rnd()*.5});
+ for(let i=0;i<7;i++)boats.push({x:300+rnd()*(W-600),y:1990+rnd()*100,a:rnd()*Math.PI});
+ for(let i=0;i<8;i++)stalls.push({x:180+i*360,y:1725,w:90,h:26,color:pick(['#c23a3a','#d8a020','#2a8a6a','#3a6ad8']),food:pick(['PEIXE','TTEOK','HOTTEOK','ESPETOS'])});
  for(const s of stalls)solids.push({x:s.x,y:s.y,w:s.w,h:s.h});
- const spawn={x:1600,y:1500};
- const spawnAreas=[{x:1200,y:1200,w:800,h:300,name:'PRAÇA DE BUSAN'},{x:200,y:200,w:900,h:400,name:'QUARTEIRÃO NORTE'},{x:2200,y:200,w:800,h:400,name:'PORTO LESTE'},{x:200,y:900,w:800,h:400,name:'MERCADO OESTE'},{x:2200,y:900,w:800,h:400,name:'COLINA SUL'}];
- const zones=[{x:0,y:0,w:W,h:1760,name:'BUSAN'},{x:0,y:1800,w:W,h:H-1800,name:'MAR DE BUSAN'}];
+ const spawn={x:PC.x,y:PC.y+150};
+ const spawnAreas=[
+  {x:PLAZA.x+40,y:PLAZA.y+40,w:PLAZA.w-80,h:PLAZA.h-80,name:'PRAÇA DE BUSAN'},
+  {x:120,y:160,w:640,h:90,name:'AVENIDA NORTE'},
+  {x:880,y:680,w:640,h:90,name:'AVENIDA CENTRAL'},
+  {x:2400,y:1200,w:640,h:90,name:'AVENIDA SUL'},
+  {x:200,y:1720,w:2800,h:40,name:'ORLA DE BUSAN'}];
+ const zones=[{x:0,y:0,w:W,h:1710,name:'BUSAN'},{x:0,y:1710,w:W,h:190,name:'PRAIA DE BUSAN'},{x:0,y:1900,w:W,h:H-1900,name:'MAR DE BUSAN'}];
  const grid=new Map(),cell=256;for(const s of solids)for(let gx=Math.floor(s.x/cell);gx<=Math.floor((s.x+s.w)/cell);gx++)for(let gy=Math.floor(s.y/cell);gy<=Math.floor((s.y+s.h)/cell);gy++){const k=gx*1000+gy;if(!grid.has(k))grid.set(k,[]);grid.get(k).push(s)}
- return {w:W,h:H,buildings,lamps,palms,boats,stalls,spawn,spawnAreas,zones,solids,grid,cell,portal:{x:1600,y:1420}};
+ return {w:W,h:H,buildings,lamps,palms,boats,stalls,spawn,spawnAreas,zones,solids,grid,cell,plaza:PC,portal:{x:PC.x,y:PLAZA.y+40}};
 })();
 function makeSecondCity(){const C=THIS_CITY2;
  const world={kind:'city2',rank:'E',theme:null,w:C.w,h:C.h,solids:C.solids,grid:C.grid,cell:C.cell,npcs:null,traffic:null,spawnAreas:C.spawnAreas,portal:C.portal,
-  blocked(x,y,rad=12){const g=this.grid,cs=C.cell;if(g){for(let gx=Math.floor((x-rad)/cs);gx<=Math.floor((x+rad)/cs);gx++)for(let gy=Math.floor((y-rad)/cs);gy<=Math.floor((y+rad)/cs);gy++){const l=g.get(gx*1000+gy);if(l)for(const s of l)if(x+rad>s.x&&x-rad<s.x+s.w&&y+rad*.6>s.y&&y-rad*.6<s.y+s.h)return true}}return y>1900},
-  terrainAt(){return null},update(){},cityTop(){},visible(v,x,y,w,h,m=60){return x+w>v.x-m&&x<v.x+v.w+m&&y+h>v.y-m&&y<v.y+v.h+m},
+  walkable:[{x:0,y:0,w:C.w,h:1900}],
+  blocked(x,y,rad=12){const g=this.grid,cs=C.cell;if(g){for(let gx=Math.floor((x-rad)/cs);gx<=Math.floor((x+rad)/cs);gx++)for(let gy=Math.floor((y-rad)/cs);gy<=Math.floor((y+rad)/cs);gy++){const l=g.get(gx*1000+gy);if(l)for(const s of l)if(x+rad>s.x&&x-rad<s.x+s.w&&y+rad*.6>s.y&&y-rad*.6<s.y+s.h)return true}}return y>2120},
+  terrainAt(x,y){if(y>1900&&y<=2120)return{kind:'slow',name:'ÁGUA DO MAR',color:'#2a7a9a',mult:.5,seed:1};return null},update(){},cityTop(){},visible(v,x,y,w,h,m=60){return x+w>v.x-m&&x<v.x+v.w+m&&y+h>v.y-m&&y<v.y+v.h+m},
   draw(c,t,v){const x0=v.x-40,y0=v.y-40,w=v.w+80,h=v.h+80;
    // grama/pedra
    c.fillStyle='#2c4438';c.fillRect(x0,y0,w,h);c.fillStyle='#3a5648';
-   for(let i=0;i<300;i++){const px=(i*173)%(C.w),py=(i*97)%(1760);c.fillRect(px,py,8,3)}
-   // praia e mar
+   for(let i=0;i<300;i++){const px=(i*173)%(C.w),py=(i*97)%(1710);c.fillRect(px,py,8,3)}
+   // orla, praia e mar (a água rasa é caminhável e fica escura com a profundidade)
+   c.fillStyle='#4a5458';c.fillRect(x0,1710,w,50);
    c.fillStyle='#c8a878';c.fillRect(x0,1760,w,140);c.fillStyle='#e0c090';c.fillRect(x0,1760,w,20);
-   const g=c.createLinearGradient(0,1900,0,C.h);g.addColorStop(0,'#0e4a68');g.addColorStop(1,'#06283c');c.fillStyle=g;c.fillRect(x0,1900,w,C.h-1900);
-   c.save();c.globalAlpha=.3;c.strokeStyle='#9fd8e8';for(let x=x0-x0%140;x<x0+w;x+=140){c.beginPath();c.ellipse(x+Math.sin(t+x)*10,1950+Math.sin(t*.7+x)*8,60,8,0,0,7);c.stroke()}c.restore();
+   const g=c.createLinearGradient(0,1900,0,C.h);g.addColorStop(0,'#1a6a8c');g.addColorStop(.55,'#0e4a68');g.addColorStop(1,'#06283c');c.fillStyle=g;c.fillRect(x0,1900,w,C.h-1900);
+   c.save();c.globalAlpha=.3;c.strokeStyle='#bff4ff';for(let x=x0-x0%140;x<x0+w;x+=140){c.beginPath();c.ellipse(x+Math.sin(t+x)*10,1960+Math.sin(t*.7+x)*8,60,8,0,0,7);c.stroke()}c.restore();
+   c.fillStyle='#e8fbff';c.font='bold 9px monospace';c.textAlign='center';c.globalAlpha=.7;c.fillText('MAR DE BUSAN',x0+w/2,2000);c.globalAlpha=1;c.textAlign='left';
    for(const b of C.boats){c.save();c.translate(b.x,b.y);c.rotate(b.a+Math.sin(t*.5+b.x)*.1);c.fillStyle='#5a3a22';c.fillRect(-22,-6,44,12);c.fillStyle='#e8e0d0';c.fillRect(-4,-26,3,22);c.beginPath();c.moveTo(0,-26);c.lineTo(16,-8);c.lineTo(0,-8);c.fill();c.restore()}
    // ruas
-   c.fillStyle='#232a2e';for(let x=0;x<C.w;x+=760)c.fillRect(x,0,120,C.h);for(let y=150;y<1760;y+=520)c.fillRect(0,y,C.w,110);
-   c.fillStyle='#3a4448';for(let x=0;x<C.w;x+=760)c.fillRect(x+10,0,100,C.h);for(let y=150;y<1760;y+=520)c.fillRect(0,y+10,C.w,90);
+   c.fillStyle='#232a2e';for(let x=0;x<C.w;x+=760)c.fillRect(x,0,120,1710);for(let y=150;y<1300;y+=520)c.fillRect(0,y,C.w,110);
+   c.fillStyle='#3a4448';for(let x=0;x<C.w;x+=760)c.fillRect(x+10,0,100,1710);for(let y=150;y<1300;y+=520)c.fillRect(0,y+10,C.w,90);
    // praça central
-   c.fillStyle='#3f4a4e';c.beginPath();c.ellipse(1600,1400,220,120,0,0,7);c.fill();c.fillStyle='#5a666a';c.beginPath();c.ellipse(1600,1400,180,92,0,0,7);c.fill();
-   c.fillStyle='#1d4a5a';c.beginPath();c.ellipse(1600,1400,70,40,0,0,7);c.fill();c.fillStyle='#9fe8f8';for(let i=0;i<8;i++){const a=i/8*7+t;c.globalAlpha=.4+.3*Math.sin(t*3+i);c.fillRect(1600+Math.cos(a)*40,1400+Math.sin(a)*22,3,3)}c.globalAlpha=1;
-   c.fillStyle='#d8e4e8';c.font='bold 12px monospace';c.textAlign='center';c.fillText('PRAÇA DE BUSAN',1600,1290);c.textAlign='left';
+   c.fillStyle='#3f4a4e';c.beginPath();c.ellipse(1960,1505,220,120,0,0,7);c.fill();c.fillStyle='#5a666a';c.beginPath();c.ellipse(1960,1505,180,92,0,0,7);c.fill();
+   c.fillStyle='#1d4a5a';c.beginPath();c.ellipse(1960,1505,70,40,0,0,7);c.fill();c.fillStyle='#9fe8f8';for(let i=0;i<8;i++){const a=i/8*7+t;c.globalAlpha=.4+.3*Math.sin(t*3+i);c.fillRect(1960+Math.cos(a)*40,1505+Math.sin(a)*22,3,3)}c.globalAlpha=1;
+   c.fillStyle='#d8e4e8';c.font='bold 12px monospace';c.textAlign='center';c.fillText('PRAÇA DE BUSAN',1960,1395);c.textAlign='left';
    // prédios
    for(const b of C.buildings){if(!world.visible(v,b.x,b.y,b.w,b.h))continue;const col=b.color,dark=shadeHex(col,-.35),light=shadeHex(col,.18);c.fillStyle=shadeHex(col,-.5);c.fillRect(b.x,b.y,b.w,b.roof);c.fillStyle=col;c.fillRect(b.x,b.y+b.roof,b.w,b.h-b.roof);
     for(let wy=b.y+b.roof+10;wy<b.y+b.h-40;wy+=26)for(let wx=b.x+10;wx<b.x+b.w-20;wx+=24){c.fillStyle='';c.fillStyle=((wx+wy)%3===0)?'#ffd98a':'#1a2836';c.fillRect(wx,wy,12,14)}
@@ -2104,6 +2119,9 @@ function makeSecondCity(){const C=THIS_CITY2;
    c.fillStyle='#d8e4e8';c.font='bold 10px monospace';c.textAlign='center';c.fillText('PORTAL · SEOUL',P.x,P.y-90);c.textAlign='left';
    // spawn marker
    c.strokeStyle='#ffffff44';c.strokeRect(C.spawn.x-20,C.spawn.y-20,40,40);
+   // nadando: ondulação em volta do jogador quando ele entra na água
+   const pl=typeof game!=='undefined'&&game.player;
+   if(pl&&pl.y>1900&&pl.y<=2120){c.save();c.strokeStyle='#bff4ff';c.globalAlpha=.4+.25*Math.sin(t*4);c.lineWidth=2;c.beginPath();c.ellipse(pl.x,pl.y+8,20+Math.sin(t*4)*3,7,0,0,7);c.stroke();c.beginPath();c.ellipse(pl.x,pl.y+8,30+Math.sin(t*4+1)*4,11,0,0,7);c.stroke();c.restore()}
   }};
  return world}
 const weapons=[{name:'Adaga de Ferro',damage:5,price:0},{name:'Presa de Kasaka',damage:18,price:300},{name:'Adaga do Assassino',damage:35,price:700},{name:'Adaga do Rei Demônio',damage:65,price:1500}];
@@ -2159,7 +2177,7 @@ drawWorldEdges(c,v){const w=this.world,col=this.backdropColor(),F=90;if(v.x>F&&v
 checkViewLayout(dt){if(this.world.kind!=='dungeon')return;this._layoutT=(this._layoutT||0)-dt;if(this._layoutT>0)return;this._layoutT=.3;const sig=this.hudSignature();if(sig!==this._layoutSig)this.resize()}
 start(saved){this.player=new Player(saved?.player);this.animation=new PlayerAnimation(this.sprites);if(this.player.hp<=0){this.player.hp=this.player.maxhp;this.player.mp=this.player.maxmp}this.army=saved?.army||[];this.quest=saved?.quest||0;this.questDate=new Date().toLocaleDateString('en-CA');if(saved?.questDate!==this.questDate)this.quest=0;this.questDone=saved?.questDate===this.questDate&&(saved?.questDone||false);this.unlocked=saved?.unlocked||0;
  const today=new Date().toLocaleDateString('en-CA');this.daily=saved?.daily&&saved.daily.date===today?saved.daily:{date:today,kills:0,dashes:0,distance:0,done:false,penalty:false};this.bestiary=saved?.bestiary||{};this.hunter=saved?.hunter||{points:0,rank:'E',evalReady:false};this.contracts=saved?.contracts||[];this.story=saved?.story||{};this.tutorialDone=saved?.tutorial||0;this.dayTime=saved?.dayTime??.32;this.cityIndex=saved?.cityIndex||0;this.newCityUnlocked=this.cityIndex>0;
- this.world=new WorldMap();this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts();this.projectiles=[];this.hazards=[];this.impacts=[];this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.pendingStrikes=[];this.panel=null;this.started=true;this.bossDefeated=false;this.chest=false;this.redGate=false;this.redGateActive=false;this.redTimer=0;this.weather=0;this.roomEvent=null;this.eventRoom=-1;this.cutscene=null;this.qte=null;this.ally=null;this.companion=null;this.hitStop=0;this.comboSeq=0;this.comboSeqT=0;this.exchangeCd=0;this.armyOrder='ATTACK';this.penalty=null;
+ this.world=this.cityIndex===1?makeSecondCity():new WorldMap();this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts();this.placePlayerAt(this.cityIndex===1?THIS_CITY2.spawn:HUB.spawn);this.projectiles=[];this.hazards=[];this.impacts=[];this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.pendingStrikes=[];this.panel=null;this.started=true;this.bossDefeated=false;this.chest=false;this.redGate=false;this.redGateActive=false;this.redTimer=0;this.weather=0;this.roomEvent=null;this.eventRoom=-1;this.cutscene=null;this.qte=null;this.ally=null;this.companion=null;this.hitStop=0;this.comboSeq=0;this.comboSeqT=0;this.exchangeCd=0;this.armyOrder='ATTACK';this.penalty=null;
  $('#start').classList.add('hidden');$('#hud').classList.remove('hidden');this.message(this.tutorialDone?'BEM-VINDO DE VOLTA, JOGADOR':'BEM-VINDO, JOGADOR');this.sound.play('alert');this.music.enabled=Settings.d.music;this.music.start();this.sound.enabled=Settings.d.sfx;this.fps=Settings.d.fps?1:0;Mobile.apply();this.updateHUD()}
 message(text){$('#notice').textContent=text;clearTimeout(this.noticeTimer);this.noticeTimer=setTimeout(()=>$('#notice').textContent='',3200)}
 shake(mag,time=.25){this.shakeMag=Math.max(this.shakeMag,mag);this.shakeT=Math.max(this.shakeT,time)}
@@ -2205,6 +2223,8 @@ isWalkable(x,y,rad=12,opts={}){const w=this.world;if(!w||x<30||y<30||x>w.w-30||y
 pathClear(x0,y0,x1,y1,rad=10){const n=Math.max(1,Math.ceil(Math.hypot(x1-x0,y1-y0)/10));for(let i=1;i<=n;i++){const k=i/n;if(!this.isWalkable(x0+(x1-x0)*k,y0+(y1-y0)*k,rad,{ignoreCars:true}))return false}return true}
 // Nearest free spot around (cx,cy) on rings minR..maxR. opts: avoid (entities), sep (min distance
 // to them), los (must be reachable in a straight line from the center), angle (preferred side).
+// Coloca o jogador em um ponto livre a partir do spawn/portal: nunca dentro de prédio ou água funda.
+placePlayerAt(sp){if(!sp)return;const free=this.findFreeSpot(sp.x,sp.y,16,0,260,{avoid:[],sep:8})||sp;this.player.x=Math.round(free.x);this.player.y=Math.round(free.y);const t=this.world.terrainAt?this.world.terrainAt(free.x,free.y):null;if(t&&t.kind==='slow'){const s=this.findFreeSpot(sp.x,sp.y,16,0,260,{avoid:[],sep:8,land:true})||sp;this.player.x=Math.round(s.x);this.player.y=Math.round(s.y)}else{this.player.x=Math.round(free.x);this.player.y=Math.round(free.y)}this._camSnap=true;this.updateCamera()}
 findFreeSpot(cx,cy,rad=12,minR=0,maxR=260,opts={}){const avoid=opts.avoid||[],sep=opts.sep??rad*2;
  const ok=(x,y)=>this.isWalkable(x,y,rad,opts)&&avoid.every(o=>Math.hypot(o.x-x,o.y-y)>=sep+(o.radius&&opts.useRadius?o.radius:0))&&(!opts.los||this.pathClear(cx,cy,x,y,Math.min(10,rad)));
  return spiralSearch(cx,cy,ok,{minR,maxR,rad,angle:opts.angle||0,step:opts.step||0})}
@@ -2246,7 +2266,7 @@ shadowStrike(s,A){const a=A.a,dmg=s.damageOf(a),col='#b46bff';s.swing=.25;A.phas
 }
 spawnSoldiers(){const p=this.player,taken=[];return this.army.map((d,i)=>{const r=Math.min(26,shadowDef(normalizeShadow(d,p.level)).radius||16);
  const sp=this.findFreeSpot(p.x,p.y,r,40,260,{los:true,avoid:[p,...taken],sep:r+14,angle:(p.angle||0)+Math.PI})||this.findFreeSpot(p.x,p.y,12,0,320,{avoid:taken,sep:20})||{x:p.x,y:p.y};taken.push(sp);return new ShadowSoldier(d,i,sp)})}
-returnHub(){this.world=this.cityIndex===1?makeSecondCity():new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];const sp=this.cityIndex===1?THIS_CITY2.spawn:HUB.spawn;this.player.x=sp.x;this.player.y=sp.y;this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;this.redGateActive=false;this.penalty=null;this.classChange=false;this.ally=null;this.roomEvent=null;this.eventRoom=-1;this.weather=0;this.armyOrder='ATTACK';
+returnHub(){this.world=this.cityIndex===1?makeSecondCity():new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];const sp=this.cityIndex===1?THIS_CITY2.spawn:HUB.spawn;this.placePlayerAt(sp);this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;this.redGateActive=false;this.penalty=null;this.classChange=false;this.ally=null;this.roomEvent=null;this.eventRoom=-1;this.weather=0;this.armyOrder='ATTACK';
  if(this.cityIndex===1){this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts()}
  UIManager.close();this.resize();this._camSnap=true;SaveSystem.save(this);this.message(this.cityIndex===1?'ÁREA SEGURA · BUSAN':'ÁREA SEGURA · ASSOCIAÇÃO DOS CAÇADORES')}
 interact(){let p=this.player;
@@ -2554,8 +2574,8 @@ revealSecret(){const w=this.world;if(!w.secret||w.secret.revealed)return;w.secre
 spawnAlly(look,name){const p=this.player;const sp=this.findFreeSpot(p.x,p.y,14,20,120,{avoid:[p],sep:24})||{x:p.x+30,y:p.y};this.ally=new Ally(sp.x,sp.y,look||PEOPLE.hunters[2],name);this.message(`${this.ally.name} ENTROU NA DUNGEON`)}
 removeAlly(){this.ally=null}
 // ---- Expansão: nova cidade (Jeju / Busan) -----------------------------------------------------
-travelToCity(idx){this.cityIndex=idx;this.newCityUnlocked=true;if(idx===0){this.world=new WorldMap();this.player.x=HUB.spawn.x;this.player.y=HUB.spawn.y;this.message('SEOUL · ASSOCIAÇÃO DOS CAÇADORES')}
- else{this.world=makeSecondCity();const c=THIS_CITY2.spawn;this.player.x=c.x;this.player.y=c.y;this.message('BUSAN · DISTRITO COSTEIRO')}
+travelToCity(idx){this.cityIndex=idx;this.newCityUnlocked=true;if(idx===0){this.world=new WorldMap();this.placePlayerAt(HUB.spawn);this.message('SEOUL · ASSOCIAÇÃO DOS CAÇADORES')}
+ else{this.world=makeSecondCity();this.placePlayerAt(THIS_CITY2.spawn);this.message('BUSAN · DISTRITO COSTEIRO')}
  this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts();this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.projectiles=[];this.hazards=[];this._camSnap=true;this.resize();SaveSystem.save(this)}
 district(p){for(const z of CITY.zones)if(p.x>z.x&&p.x<z.x+z.w&&p.y>z.y&&p.y<z.y+z.h)return z.name;for(const a of CITY.spawnAreas)if(a.w<3000&&a.h<2000&&p.x>a.x&&p.x<a.x+a.w&&p.y>a.y&&p.y<a.y+a.h)return a.name;return p.y>RIVER.y?(p.x>4400?'YONGSAN LESTE':'YONGSAN'):p.y<700?'DISTRITO DAS GUILDAS':p.x>4400?'JONGNO':p.x>3040?'DISTRITO COMERCIAL':p.x<1000?'GANGNAM OESTE':'CENTRO DE SEUL'}
 updateHUD(){let p=this.player;const cap=this.shadowCap();const rankIdx=RANKS.indexOf(p.rank),hunter=this.hunter||{rank:'E',points:0};const hNext=rankIdx<5?HUNTER_THRESH[rankIdx+1]:null;const hTxt=`RANK ${p.rank}${hNext?` · ${hunter.points}/${hNext}`:` · MÁX`} · ${CLASSES[p.playerClass].name}`;const rk=$('#rank');if(rk){rk.textContent=hTxt;rk.style.color=CLASSES[p.playerClass].color}
@@ -2716,7 +2736,7 @@ drawMap(){let m=mapctx,w=this.world,sx=150/w.w,sy=100/w.h,X=x=>x*sx+5,Y=y=>y*sy+
   m.strokeStyle='#a7fcff55';m.strokeRect(X(this.camera.x),Y(this.camera.y),canvas.width*sx,canvas.height*sy)}
  else if(w.kind==='city2'){// Busan: quadras, orla e o portal de volta a Seoul.
   m.fillStyle='#2c4438';m.fillRect(X(0),Y(0),w.w*sx,1760*sy);m.fillStyle='#c8a878';m.fillRect(X(0),Y(1760),w.w*sx,140*sy);m.fillStyle='#0e4a68';m.fillRect(X(0),Y(1900),w.w*sx,(w.h-1900)*sy);
-  m.fillStyle='#232a2e';for(let x=0;x<w.w;x+=760)m.fillRect(X(x),Y(0),120*sx,w.h*sy);for(let y=150;y<1760;y+=520)m.fillRect(X(0),Y(y),w.w*sx,110*sy);
+  m.fillStyle='#232a2e';for(let x=0;x<w.w;x+=760)m.fillRect(X(x),Y(0),120*sx,1710*sy);for(let y=150;y<1300;y+=520)m.fillRect(X(0),Y(y),w.w*sx,110*sy);
   m.fillStyle='#4a5a68';for(const b of THIS_CITY2.buildings)m.fillRect(X(b.x),Y(b.y),b.w*sx,b.h*sy);
   m.fillStyle='#3bcfff';m.fillRect(X(THIS_CITY2.portal.x)-2,Y(THIS_CITY2.portal.y)-2,5,5);
   for(const g of this.gates.list){m.fillStyle=g.red?'#ff5363':'#54dfff';m.fillRect(X(g.x)-2,Y(g.y)-2,4,4)}
