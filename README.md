@@ -6,9 +6,10 @@ Action RPG top-down para navegador, inspirado em Solo Leveling. Abra `index.html
 
 - WASD / setas: mover; mouse: mirar; clique esquerdo / espaço: atacar
 - Shift / clique direito: passo sombrio; 1, 2, 3: habilidades
-- E: interagir / extrair sombra; R: invocar / guardar sombras
+- E: interagir / extrair sombra ("Levante-se"); R: invocar / guardar sombras
+- G: chamar Yoo Jin-ho (depois que ele se junta a você)
 - Q / F: poções de vida / mana
-- C / Tab: status; I: inventário; V: sombras; B: loja; Esc: pausa
+- C / Tab: status; T: talentos; I: inventário; V: sombras; P: contratos; B: loja; N: bestiário; Esc: pausa
 
 No hub, aproxime-se dos portais e pressione E para escolher uma dungeon. Derrote o chefe, abra o baú e use o portal para retornar. O progresso é salvo no armazenamento local do navegador.
 
@@ -62,6 +63,18 @@ Em telas de toque, os controles aparecem sozinhos. Também dá para forçar ou d
 - **Orientação:** na vertical aparece um aviso para girar o aparelho. Também é possível escolher "Jogar na vertical".
 
 O layout de desktop (teclado e mouse) não mudou.
+
+## Sistemas da expansão
+
+- **Combate com impacto:** hit-stop de 40–60 ms em golpes fortes, críticos e na morte do chefe; contador de combo visível que rende XP e MP quando você encadeia golpes sem levar dano; monsteris de elite (VELOZ, BLINDADO, EXPLOSIVO) com recompensas dobradas.
+- **Usar o terreno:** o dash e a Autoridade empurram monstros para lava, teia e veneno; os pilares da Cidadela de Kargalgan quebram com golpes corpo a corpo e abrem passagem.
+- **Chefes em fases:** aos 50% e 20% de HP o chefe muda o padrão, invoca ajudantes e o cenário reage (as estátuas de Cartenon se movem, a lava sobe na fortaleza vulcânica, a nevasca piora). Um QTE decisivo com barra de acerto aparece nas fases: acerte para enfraquecer, falhe e ele contra-ataca.
+- **Exército das sombras:** extração com 3 tentativas (chance por nível e INT); chefes viram sombras únicas com nome e patente própria (IGRIS, TANK, IRON, BERU); ordens de ATACAR / DEFENDER / MANTER POSIÇÃO (botão no celular e no painel Sombras); Shadow Exchange para trocar de lugar com uma sombra (recarga longa). As sombras se espalham em formação e não se amontoam.
+- **Progressão:** missão diária do Sistema (100 flexões = abates, 100 abdominais = esquivas, 10 km de corrida) com recompensa e, se falhar, a Zona de Penalidade (arena de ondas); árvore de talentos por atributo (FOR/AGI/VIT/INT/PER); equipamentos raros dos chefes (Adaga de Kasaka, Espada do Barca, Capa do Rei Demônio); mudança de classe no nível 40 com dungeon especial de Cartenon; bestiário com 50 abates por tipo concedendo +4% de dano.
+- **Dungeons vivas:** gate vermelho sem saída até o chefe, com cronômetro e clima que piora (a lava sobe, a nevasca engrossa); eventos aleatórios de sala (baú armadilhado, caçador ferido, desafio contra o relógio); uma sala secreta por mapa, revelada por Percepção alta ou chegando perto da parede rachada; quebra de dungeon quando um gate expira sem dono, soltando monstros na cidade e fazendo os NPCs fugirem.
+- **Cidade e mundo:** Associação dos Caçadores com contratos por rank e pontos de caçador que sobem seu rank da associação (com reavaliação); Yoo Jin-ho como companheiro de dungeon e Cha Hae-in nos gates de rank alto; ciclo de dia e noite (mais gates e mais vermelhos à noite, sombras mais fortes); segunda cidade (Busan) com praia, porto e portal de volta a Seoul; monetização do save em código para PC ↔ celular.
+- **Interface e acessibilidade:** tutorial interativo nos primeiros minutos; assistente de mira no toque (segure o ataque para ver a direção e solte para golpear); indicador de inimigos fora da tela; configurações de tremor de tela reduzido, filtro para daltônicos, texto maior, medidor de FPS, música e efeitos ligados/desligados e perfil ultra leve.
+- **Som procedural:** trilha por tema (tambores na cidadela, drone e gotas no metrô/mina, coro nos ranks S), áudio espacial com volume e pan por distância, bip do Sistema nas notificações.
 
 ## Verificação
 

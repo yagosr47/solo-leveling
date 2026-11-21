@@ -1,7 +1,47 @@
 const $=s=>document.querySelector(s), canvas=$('#canvas'),ctx=canvas.getContext('2d'),mapctx=$('#map').getContext('2d');
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x)), rand=(a,b)=>Math.random()*(b-a)+a, dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 class InputHandler{constructor(){this.keys={};this.mouse={x:0,y:0,down:false};window.addEventListener('keydown',e=>{if(['Tab',' ','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))e.preventDefault();if(!this.keys[e.key.toLowerCase()])game.key(e.key.toLowerCase());this.keys[e.key.toLowerCase()]=true});window.addEventListener('keyup',e=>this.keys[e.key.toLowerCase()]=false);this.stick={x:0,y:0,mag:0};this.touchAttack=false;this.touchMode=false;const fromTouch=()=>Mobile.on&&performance.now()-Mobile.lastTouch<1200;canvas.addEventListener('mousemove',e=>{if(fromTouch())return;const s=game.renderScale||1;this.mouse.x=e.clientX/s;this.mouse.y=e.clientY/s});canvas.addEventListener('mousedown',e=>{if(fromTouch())return;if(e.button===0)this.mouse.down=true;if(e.button===2)game.dash()});window.addEventListener('mouseup',()=>this.mouse.down=false);canvas.addEventListener('contextmenu',e=>e.preventDefault())}}
-class SoundFX{constructor(){this.audio=null} play(type){try{this.audio??=new AudioContext();let a=this.audio,o=a.createOscillator(),g=a.createGain();if(type==='horn'){const o2=a.createOscillator();o.type=o2.type='square';o.frequency.value=392;o2.frequency.value=494;g.gain.setValueAtTime(.018,a.currentTime);g.gain.setValueAtTime(.018,a.currentTime+.32);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+.4);o.connect(g);o2.connect(g);g.connect(a.destination);o.start();o2.start();o.stop(a.currentTime+.4);o2.stop(a.currentTime+.4);return}o.type=type==='shadow'?'sawtooth':'triangle';o.frequency.setValueAtTime(type==='hit'?130:type==='shadow'?90:450,a.currentTime);o.frequency.exponentialRampToValueAtTime(type==='hit'?60:type==='shadow'?180:180,a.currentTime+.15);g.gain.setValueAtTime(.035,a.currentTime);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+.17);o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+.18)}catch{}}}
+class SoundFX{constructor(){this.audio=null;this.enabled=true;this.master=null} 
+ // Spatial audio: volume and stereo pan follow the distance/side of the source relative to the player.
+ play(type,x=0,y=0){if(!this.enabled)return;try{this.audio??=new AudioContext();if(this.audio.state==='suspended')this.audio.resume&&this.audio.resume();const a=this.audio;
+  let vol=1,pan=0;const g0=liveGame();if(g0&&g0.player&&type!=='horn'&&type!=='sys'&&type!=='alert'){const d=Math.hypot(x-g0.player.x,y-g0.player.y);vol=clamp(1-d/900,.05,1);pan=clamp((x-g0.player.x)/700,-1,1)}
+  const out=a.destination;let head=out;
+  if(a.createStereoPanner&&pan){const pn=a.createStereoPanner();pn.pan.value=pan;pn.connect(out);head=pn}
+  const g=a.createGain();g.gain.value=vol;g.connect(head);
+  if(type==='horn'){const o=a.createOscillator(),o2=a.createOscillator();o.type=o2.type='square';o.frequency.value=392;o2.frequency.value=494;g.gain.setValueAtTime(.018*vol,a.currentTime);g.gain.setValueAtTime(.018*vol,a.currentTime+.32);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+.4);o.connect(g);o2.connect(g);o.start();o2.start();o.stop(a.currentTime+.4);o2.stop(a.currentTime+.4);return}
+  if(type==='sys'){// the System's signature notification beep: two bright square blips
+   for(const [f,dt] of [[880,0],[1320,.09]]){const o=a.createOscillator();o.type='square';o.frequency.value=f;const gg=a.createGain();gg.gain.setValueAtTime(.0001,a.currentTime+dt);gg.gain.exponentialRampToValueAtTime(.05*vol,a.currentTime+dt+.01);gg.gain.exponentialRampToValueAtTime(.0001,a.currentTime+dt+.12);o.connect(gg);gg.connect(g);o.start(a.currentTime+dt);o.stop(a.currentTime+dt+.14)}return}
+  const o=a.createOscillator();o.type=type==='shadow'?'sawtooth':type==='slash'?'square':type==='dash'?'sine':'triangle';
+  const f0=type==='hit'?130:type==='shadow'?90:type==='slash'?620:type==='dash'?300:type==='alert'?520:450,f1=type==='hit'?60:type==='shadow'?180:type==='slash'?180:type==='dash'?520:180;
+  o.frequency.setValueAtTime(f0,a.currentTime);o.frequency.exponentialRampToValueAtTime(f1,a.currentTime+.15);
+  g.gain.setValueAtTime(.035*vol,a.currentTime);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+.17);o.connect(g);o.start();o.stop(a.currentTime+.18)}catch{}}
+ // Short helper for UI / system windows.
+ beep(){this.play('sys')}}
+// Procedural music: a tiny step sequencer built on Web Audio. Each dungeon theme gets a mood
+// (drums for the citadel, drips + a low drone for the subway, a choir for S-rank maps, ambient pad
+// elsewhere). No samples, no dependencies; it starts on the first user gesture and never crashes.
+class MusicSystem{constructor(){this.enabled=true;this.theme=null;this.step=0;this.next=0;this.timer=null;this.intensity=0}
+ setTheme(id,rank){this.theme=id;this.rank=rank;this.intensity=0}
+ start(){if(this.timer||typeof window==='undefined'||!window.addEventListener)return;if(!this.enabled)return;const loop=()=>{if(!this.enabled)return;const g=liveGame();const th=g&&g.world&&g.world.theme;const hub=g&&g.world&&g.world.kind==='hub';
+   if(th)this.theme=th.id;if(g&&g.world)this.rank=g.world.rank;this.intensity=clamp(this.intensity+.02,0,1);
+   try{this.tick()}catch(e){} this.timer=setTimeout(loop,120)};this.timer=setTimeout(loop,400)}
+ stop(){clearTimeout(this.timer);this.timer=null}
+ tick(){const a=this.audio||(this.audio=new (window.AudioContext||window.webkitAudioContext)());if(a.state==='suspended')a.resume&&a.resume();const t=a.currentTime,th=this.theme||'hub';
+  const scale=[0,3,5,7,10];
+  const root=110,note=(i,oct=1)=>root*Math.pow(2,(scale[((i%scale.length)+scale.length)%scale.length]+12*(oct-1))/12);
+  const out=a.createGain();out.gain.value=.16;out.connect(a.destination);
+  const step=this.step++;
+  const drum=(kind)=>{const o=a.createOscillator(),g=a.createGain();o.type='sine';o.frequency.setValueAtTime(kind==='kick'?120:kind==='hat'?600:200,t);o.frequency.exponentialRampToValueAtTime(kind==='kick'?40:kind==='hat'?300:80,t+.1);g.gain.setValueAtTime(kind==='hat'?.05:.16,t);g.gain.exponentialRampToValueAtTime(.001,t+.16);o.connect(g);g.connect(out);o.start(t);o.stop(t+.18)};
+  const blip=(f,dur=.2,type='sine',v=.08)=>{const o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.value=f;g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(v,t+.02);g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(g);g.connect(out);o.start(t);o.stop(t+dur+.02)};
+  const choir=(f,dur=1.6)=>{for(const det of [-6,0,6]){const o=a.createOscillator(),g=a.createGain();o.type='sawtooth';o.frequency.value=f;o.detune.value=det;g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.028,t+dur*.4);g.gain.linearRampToValueAtTime(.0001,t+dur);o.connect(g);g.connect(out);o.start(t);o.stop(t+dur+.05)}};
+  if(th==='kargalgan'||th==='igris'||th==='volcanic'){// drums of the citadel
+   if(step%4===0)drum('kick');if(step%4===2)drum('snare');if(step%2===1)drum('hat');if(step%16===8)blip(note(step/16,1),.3,'triangle',.05)}
+  else if(th==='metro'||th==='mine'||th==='catacombs'){// low drone + water drips
+   if(step%8===0)blip(55,1.8,'sine',.09);if(step%3===0&&Math.random()<.5)blip(1200+Math.random()*800,.12,'sine',.03);if(step%16===0)blip(82.4,1.2,'triangle',.05)}
+  else if(this.rank==='S'||th==='rift'||th==='jeju'||th==='baran'){// choir for S-rank maps
+   if(step%16===0)choir(note(0,1));if(step%16===8)choir(note(2,1));if(step%32===24)choir(note(4,1));if(step%8===4)blip(note(step,2),.4,'sine',.02)}
+  else{if(step%8===0)blip(note(step/8,1),1.1,'sine',.05);if(step%8===4)blip(note(step/8+2,1),.9,'triangle',.035);if(step%16===12)blip(note(step/8+4,2),.5,'sine',.02)}
+ }}
 // Pixel art is rasterised once into cached canvases; no external artwork is required.
 // PixelGrid is a tiny software painter: shapes are filled pixel by pixel (flat, or with three
 // volumetric tones lit by moonlight from the upper left), then a selective-outline + rim-light
@@ -403,6 +443,7 @@ const PEOPLE=(()=>{
   merchant:{id:'merchant',kind:'civ',skin:'#e0b494',hair:'#8a8a8e',hairStyle:'short',beard:true,top:'#7a5636',topType:'apron',accent:'#c8b48a',inner:'#e8e0d0',pants:'#3a2a1e',shoes:'#2a2220',belt:'#2a1d14',scale:.97,build:1.12},
   healer:{id:'healer',kind:'civ',skin:'#f1d2bd',hair:'#c9a36b',hairStyle:'bun',top:'#eef6f6',topType:'labcoat',inner:'#5ab0b8',pants:'#5d7c86',shoes:'#e8e4dc',accent:'#4fb8c8',glasses:true,scale:.95,build:.92},
   guard:H('guard',{armor:'#1f2a3a',trim:'#d8b44a',helm:'visor',crest:'#2a4a8a',weapon:'spear',cape:'#14202e',eyeGlow:'#7fe8ff',scale:1.04}),
+  jinho:H('jinho',{armor:'#d8dde2',trim:'#3a7ad8',cape:'#2a4a8a',weapon:'axe',hairStyle:'short',beard:true,top:'#d8dde2'}),
  };
  const all={};for(const l of [...civ,...hunters,...Object.values(special)])all[l.id]=l;
  return {civ,hunters,special,all};
@@ -524,8 +565,20 @@ class ParticleSystem{
   else if(p.kind==='streak'){c.lineWidth=p.size*.7;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(p.x-p.vx*.05,p.y-p.vy*.05);c.stroke()}
   else c.fillRect(p.x-p.size/2,p.y-p.size/2,p.size*(.5+k*.5),p.size*(.5+k*.5))}c.restore()}
 }
-class SaveSystem{static save(g){try{localStorage.setItem('shadow-protocol-save',JSON.stringify({player:g.player.data(),army:g.army,quest:g.quest,questDone:g.questDone,questDate:g.questDate,unlocked:g.unlocked}))}catch(e){console.warn('Não foi possível salvar:',e)}}static load(){try{return JSON.parse(localStorage.getItem('shadow-protocol-save'))}catch{return null}}}
-class Player{constructor(data={}){Object.assign(this,{x:HUB.spawn.x,y:HUB.spawn.y,level:1,xp:0,gold:250,points:0,stats:{FOR:5,AGI:5,VIT:5,INT:5,PER:5},weapon:0,owned:[0],hppots:3,mppots:3,hp:225,mp:125},data);this.owned=Array.isArray(this.owned)?this.owned:[0,this.weapon];if(!this.owned.includes(this.weapon))this.owned.push(this.weapon);this.x=HUB.spawn.x;this.y=HUB.spawn.y;this.cool=0;this.dashCd=0;this.slash=0;this.dashTime=0;this.invuln=0;this.stealth=0;this.angle=0;this.combo=0;this.hurtTime=0;this.slow=0}get maxhp(){return 100+this.stats.VIT*25}get maxmp(){return 50+this.stats.INT*15}get rank(){return ['E','D','C','B','A','S'][Math.min(5,Math.floor(this.level/10))]}data(){let {level,xp,gold,points,stats,weapon,owned,hppots,mppots,hp,mp}=this;return {level,xp,gold,points,stats,weapon,owned,hppots,mppots,hp,mp}}}
+class SaveSystem{static save(g){try{localStorage.setItem('shadow-protocol-save',JSON.stringify({player:g.player.data(),army:g.army,quest:g.quest,questDone:g.questDone,questDate:g.questDate,unlocked:g.unlocked,daily:g.daily,bestiary:g.bestiary,hunter:g.hunter,contracts:g.contracts,story:g.story,tutorial:g.tutorialDone||0,dayTime:g.dayTime||0,cityIndex:g.cityIndex||0}))}catch(e){console.warn('Não foi possível salvar:',e)}}
+ static load(){try{return JSON.parse(localStorage.getItem('shadow-protocol-save'))}catch{return null}}
+ // Export / import: the whole save travels as a compact base64 string, so the player can move
+ // between PC and phone (or keep a backup) without any server.
+ static export(g){try{return btoa(unescape(encodeURIComponent(JSON.stringify({player:g.player.data(),army:g.army,quest:g.quest,questDone:g.questDone,questDate:g.questDate,unlocked:g.unlocked,daily:g.daily,bestiary:g.bestiary,hunter:g.hunter,contracts:g.contracts,story:g.story,tutorial:g.tutorialDone||0,dayTime:g.dayTime||0,cityIndex:g.cityIndex||0}))))}catch(e){return null}}
+ static import(code){try{const o=JSON.parse(decodeURIComponent(escape(atob(String(code).trim()))));if(!o||!o.player)return null;try{localStorage.setItem('shadow-protocol-save',JSON.stringify(o))}catch(e){}return o}catch(e){return null}}}
+class Player{constructor(data={}){Object.assign(this,{x:HUB.spawn.x,y:HUB.spawn.y,level:1,xp:0,gold:250,points:0,stats:{FOR:5,AGI:5,VIT:5,INT:5,PER:5},weapon:0,owned:[0],hppots:3,mppots:3,hp:225,mp:125,playerClass:0,items:[],equipped:{weapon:null,cape:null},talents:{},talentPoints:0,distance:0,dashes:0,kills:0},data);this.owned=Array.isArray(this.owned)?this.owned:[0,this.weapon];if(!this.owned.includes(this.weapon))this.owned.push(this.weapon);this.equipped=this.equipped||{weapon:null,cape:null};this.talents=this.talents||{};this.items=Array.isArray(this.items)?this.items:[];this.x=HUB.spawn.x;this.y=HUB.spawn.y;this.cool=0;this.dashCd=0;this.slash=0;this.dashTime=0;this.invuln=0;this.stealth=0;this.angle=0;this.combo=0;this.hurtTime=0;this.slow=0}
+ get maxhp(){return Math.round((100+this.stats.VIT*25)*(1+talentLevel('vit_hp')*.08)*(this.playerClass>=1?1.15:1))}get maxmp(){return 50+this.stats.INT*15}
+ get rank(){return ['E','D','C','B','A','S'][Math.min(5,Math.floor(this.level/10))]}
+ get atk(){let a=10+this.stats.FOR*3.5+weapons[this.weapon].damage;for(const id of this.items)if(id&&ITEMS[id]&&ITEMS[id].slot==='weapon'&&this.equipped.weapon===id)a+=ITEMS[id].damage;return a}
+ get armor(){let a=0;for(const id of this.items)if(id&&ITEMS[id]&&ITEMS[id].slot==='cape'&&this.equipped.cape===id)a+=ITEMS[id].armor||0;return a}
+ get shadowPowerMult(){let m=1;for(const id of this.items)if(id&&ITEMS[id]&&ITEMS[id].effect&&ITEMS[id].effect.kind==='shadow'&&this.equipped.cape===id)m*=ITEMS[id].effect.mult;return m}
+ get classColor(){return ['#b46bff','#7fe8ff','#ffd27a'][this.playerClass]||'#b46bff'}
+ data(){let {level,xp,gold,points,stats,weapon,owned,hppots,mppots,hp,mp,playerClass,items,equipped,talents,talentPoints,distance,dashes,kills}=this;return {level,xp,gold,points,stats,weapon,owned,hppots,mppots,hp,mp,playerClass,items,equipped,talents,talentPoints,distance,dashes,kills}}}
 // ---------------------------------------------------------------------------------------------
 // City hub: the original association lobby sits in the middle of a modern Seoul-like district.
 // The map grew from 4200x3000 to 7600x5200: an east district (Gwanghwamun plaza, Myeongdong
@@ -533,7 +586,7 @@ class Player{constructor(data={}){Object.assign(this,{x:HUB.spawn.x,y:HUB.spawn.
 // the south district (Hangang park, Yongsan station, school, night market, residential blocks
 // with back alleys). Lobby drawing keeps its own local coordinates, translated by (ox, oy).
 const HUB={w:7600,h:5200,ox:1200,oy:900};
-HUB.spawn={x:HUB.ox+900,y:HUB.oy+790};HUB.merchant={x:HUB.ox+310,y:HUB.oy+620};HUB.healer={x:HUB.ox+1490,y:HUB.oy+620};
+HUB.spawn={x:HUB.ox+900,y:HUB.oy+790};HUB.merchant={x:HUB.ox+310,y:HUB.oy+620};HUB.healer={x:HUB.ox+1490,y:HUB.oy+620};HUB.contractBoard={x:HUB.ox+1000,y:HUB.oy+440};HUB.jinho={x:HUB.ox+700,y:HUB.oy+760};HUB.portal2={x:HUB.ox+1150,y:HUB.oy+760};
 HUB.posts=[{x:HUB.ox+800,y:HUB.oy+402,dir:2},{x:HUB.ox+1000,y:HUB.oy+402,dir:2}];
 const RIVER={y:2800,h:200};
 const NAMES={
@@ -860,7 +913,7 @@ class CityNPCSystem{
    if(near<55){const far=this.list.find(a=>a.state==='walk'&&!a.leader&&Math.hypot(a.x-p.x,a.y-p.y)>2600);if(far){for(let i=0;i<8;i++){const n=this.graph.random(),d=Math.hypot(n.x-p.x,n.y-p.y);if(d>700&&d<1400&&!this.onScreen(n,g)&&this.free(n.x,n.y,true)){far.x=n.x;far.y=n.y;far.node=n;far.path=[];far.edgeTo=null;far.prev=null;if(far.partner){const ps=spiralSearch(n.x+10,n.y,(x,y)=>this.free(x,y,true),{rad:NPC_RULES.spawnRad,maxR:60})||n;far.partner.x=ps.x;far.partner.y=ps.y}break}}}}}}
  visible(v){return this.list.filter(a=>a.x>v.x-40&&a.x<v.x+v.w+40&&a.y>v.y-20&&a.y<v.y+v.h+70)}
 }
-class WorldMap{constructor(kind='hub',rank='E',theme=null){this.kind=kind;this.rank=rank;this.theme=kind==='dungeon'?(theme||pickTheme(rank)):null;this.w=kind==='hub'?HUB.w:1800;this.h=kind==='hub'?HUB.h:1200;this.tile=this.makeTile();if(kind==='hub'){this.solids=CITY.solids;this.grid=CITY.grid;this.buildingCache=new Map();this.traffic=new TrafficSystem();this.npcs=typeof CityNPCSystem!=='undefined'?new CityNPCSystem(this):null}}
+class WorldMap{constructor(kind='hub',rank='E',theme=null){this.kind=kind;this.rank=rank;this.theme=kind==='dungeon'?(theme||pickTheme(rank)):null;this.w=kind==='hub'?HUB.w:2400;this.h=kind==='hub'?HUB.h:1500;this.tile=this.makeTile();if(kind==='hub'){this.solids=CITY.solids;this.grid=CITY.grid;this.buildingCache=new Map();this.traffic=new TrafficSystem();this.npcs=typeof CityNPCSystem!=='undefined'?new CityNPCSystem(this):null}}
 makeTile(){
  if(this.theme)return DungeonArt.tile(this.theme);
  const c=document.createElement('canvas');c.width=64;c.height=64;const x=c.getContext('2d');x.imageSmoothingEnabled=false;
@@ -1054,8 +1107,24 @@ hub(c,t){
  this.plazaDetails(c,t);this.fountain(c,900,680,t);
  this.merchantShop(c,205,360,t);this.clinic(c,1385,360,t);
  this.npc(c,310,620,'MERCADOR','npc_merchant',t);this.npc(c,1490,620,'CURANDEIRA','npc_healer',t);
+ // Quadro de contratos da Associação, Yoo Jin-ho e o portal para Busan.
+ this.contractBoard(c,1000,440,t);
+ this.npc(c,700,760,'YOO JIN-HO','npc_jinho',t);
+ this.portalMarker(c,1150,760,t,'PORTAL · BUSAN','#3bcfff');
  // Door guards and the hunters around the plaza are CityNPCs (see CityNPCSystem).
 }
+// Quadro de contratos: painel físico da Associação com os avisos de gate.
+contractBoard(c,x,y,t){c.save();c.translate(x,y);
+ c.fillStyle='#0008';c.fillRect(-52,44,104,10);
+ c.fillStyle='#4a3a26';c.fillRect(-46,-34,92,80);c.fillStyle='#6a5232';c.fillRect(-46,-34,92,6);c.fillStyle='#3a2c1c';c.fillRect(-40,-28,80,68);
+ for(let i=0;i<3;i++){const py=-22+i*20,pulse=.5+.5*Math.sin(t*2+i);c.fillStyle=i===0?`rgba(255,70,80,${.5+.4*pulse})`:'#e8e0cc';c.fillRect(-34,py,68,14);c.fillStyle='#2a2016';c.font='bold 7px monospace';c.textAlign='center';c.fillText(['GATE VERMELHO','CONTRATOS','RANK E'][i]||'',0,py+10);c.textAlign='left'}
+ c.fillStyle='#d8c8a0';c.font='bold 9px monospace';c.textAlign='center';c.fillText('CONTRATOS',0,-40);c.textAlign='left';c.restore()}
+// Marcador de portal de viagem entre cidades.
+portalMarker(c,x,y,t,label,col){c.save();c.translate(x,y);
+ const g=c.createRadialGradient(0,0,4,0,0,70);g.addColorStop(0,'#ffffff');g.addColorStop(.3,col);g.addColorStop(1,'#07101b');c.fillStyle=g;c.beginPath();c.ellipse(0,0,44,58,0,0,7);c.fill();
+ c.shadowBlur=18;c.shadowColor=col;c.strokeStyle=col;c.lineWidth=3;c.beginPath();c.ellipse(0,0,46,60,0,0,7);c.stroke();c.shadowBlur=0;
+ c.globalAlpha=.5+.3*Math.sin(t*3);c.fillStyle=col;c.beginPath();c.ellipse(0,0,20,30,0,0,7);c.fill();c.globalAlpha=1;
+ c.fillStyle='#d8e4e8';c.font='bold 10px monospace';c.textAlign='center';c.fillText(label,0,-78);c.textAlign='left';c.restore()}
 associationBuilding(c,t){
  // Footprint shadow and side wings give the facade depth.
  c.fillStyle='#0008';c.fillRect(530,318,740,14);
@@ -1345,9 +1414,11 @@ const DungeonArt={
   // subtle vignette inside each room (corners darker) gives depth to flat tiles
   for(const r of w.rooms){const g=c.createRadialGradient(r.cx,r.cy,40,r.cx,r.cy,Math.max(r.w,r.h)*.62);g.addColorStop(0,'#00000000');g.addColorStop(1,'#00000055');c.fillStyle=g;c.fillRect(r.x,r.y,r.w,r.h)}
   for(const z of w.zones)this.zoneBase(c,z,th);
-  for(const p of w.props)if(!p.solid)this.prop(c,p,th,R);
+  for(const p of w.props)if(!p.solid&&!p.dead)this.prop(c,p,th,R);
   this.walls(c,w,th);
-  for(const p of w.props)if(p.solid)this.prop(c,p,th,R);
+  for(const p of w.props)if(p.solid&&!p.dead)this.prop(c,p,th,R);
+  // pilares quebráveis: rachaduras mostram o dano acumulado antes de desabar
+  const brk=(typeof game!=='undefined'&&game.breakables)||[];for(const b of brk){if(b.hp>=b.maxhp)continue;const cx=b.x+b.w/2,cy=b.y+b.h/2;c.save();c.globalAlpha=.7;c.strokeStyle='#1a0f08';c.lineWidth=1.5;const k=1-b.hp/b.maxhp;c.beginPath();c.moveTo(cx-8,cy-14*k);c.lineTo(cx+3,cy-4);c.lineTo(cx-4,cy+8*k);c.stroke();c.restore()}
   return cv},
  zoneBase(c,z,th){c.save();c.translate(z.x,z.y);const k=z.kind;
   const blob=(rx,ry,col,al)=>{c.globalAlpha=al;c.fillStyle=col;c.beginPath();for(let i=0;i<=16;i++){const a=i/16*Math.PI*2,j=.85+.15*Math.sin(a*3+z.seed);i?c.lineTo(Math.cos(a)*rx*j,Math.sin(a)*ry*j):c.moveTo(rx*j,0)}c.closePath();c.fill();c.globalAlpha=1};
@@ -1531,6 +1602,16 @@ class DungeonGenerator{
   }
   rooms.forEach((r,i)=>{r.id=i;r.links=corridors.filter(c=>c.a===i||c.b===i).map(c=>c.a===i?c.b:c.a)});
   world.rooms=rooms;world.corridors=corridors;world.walkable=[...rooms,...corridors];world.seed=Math.floor(Math.random()*1e9);
+  // Sala secreta: um décimo cômodo escondido atrás de uma parede rachada, fora da grade 3x3.
+  // Só entra em `rooms`/`walkable` (e no bake) quando o jogador a revela.
+  {const opt=[{adj:2,dir:'r'},{adj:8,dir:'r'},{adj:6,dir:'b'},{adj:8,dir:'b'}][Math.floor(Math.random()*4)],A=rooms[opt.adj];
+   let sr,scr,crack;
+   if(opt.dir==='r'){sr={x:1830,y:A.y,w:420,h:280,cx:2040,cy:A.cy,seen:false};crack={x:A.x+A.w,y:A.cy};
+    scr={x:A.cx,y:A.cy-55,w:sr.cx-A.cx,h:110,a:opt.adj,b:99,gap:{x:A.x+A.w,y:A.cy-55,w:sr.x-(A.x+A.w),h:110}}}
+   else{sr={x:A.x,y:1230,w:420,h:280,cx:A.cx,cy:1370,seen:false};crack={x:A.cx,y:A.y+A.h};
+    scr={x:A.cx-55,y:A.cy,w:110,h:sr.cy-A.cy,a:opt.adj,b:99,gap:{x:A.cx-55,y:A.y+A.h,w:110,h:sr.y-(A.y+A.h)}}}
+   sr.id=99;sr.links=[opt.adj];A.links.push(99);
+   world.secret={room:sr,corridor:scr,adj:opt.adj,crack,revealed:false}}
   // Themed layout (hazards, props, solid cover, lights) and a single pre-rendered static layer.
   DungeonArt.layout(world,world.theme,seededRandom(world.seed));world.wallLayer=DungeonArt.bake(world);return world;
  }
@@ -1548,16 +1629,19 @@ class GateSystem{
   const closed=this.list.filter(gate=>gate.life<=0);for(const gate of closed){g.particles.burst(gate.x,gate.y,gate.red?'#ff4b57':'#3bcfff',40,{speed:220});g.particles.ring(gate.x,gate.y+30,gate.red?'#ff4b57':'#3bcfff',160,.5,5);g.message(`GATE RANK ${gate.rank} SE FECHOU`)}
   this.list=this.list.filter(gate=>gate.life>0);
   this.timer-=dt;if(!this.list.length&&this.timer>4)this.timer=4;
-  if(this.timer<=0){this.timer=rand(...GATE_RULES.interval);if(this.list.length<GATE_RULES.maxActive)this.spawn(g)}
+  if(this.timer<=0){this.timer=rand(...GATE_RULES.interval);if(this.list.length<GATE_RULES.maxActive){
+   // portais à noite ficam mais perigosos e mais frequentes
+   const night=g.isNight?.();if(night)this.timer*=.6;
+   this.spawn(g,{red:Math.random()<(night?.45:.22)})}}
  }
- point(g){const areas=CITY.spawnAreas,total=areas.reduce((s,a)=>s+a.w*a.h,0);
+ point(g){const areas=(g.world&&g.world.spawnAreas)||CITY.spawnAreas,total=areas.reduce((s,a)=>s+a.w*a.h,0);
   for(let i=0;i<40;i++){let pick=Math.random()*total,idx=0;for(;idx<areas.length-1;idx++){pick-=areas[idx].w*areas[idx].h;if(pick<=0)break}const a=areas[idx],x=a.x+Math.random()*a.w,y=a.y+Math.random()*a.h;
    if(g.world.blocked&&g.world.blocked(x,y,70))continue;if(this.list.some(o=>dist(o,{x,y})<320))continue;if(g.player&&dist(g.player,{x,y})<180)continue;return {x,y,district:a.name||GATE_AREAS[idx]}}
   return null}
  spawn(g,opts={}){const pt=opts.x!==undefined?{x:opts.x,y:opts.y,district:opts.district||'CIDADE'}:this.point(g);if(!pt)return null;
   const top=clamp(g.unlocked||0,0,5),red=opts.red??Math.random()<.25,rankIdx=opts.rank!==undefined?RANKS.indexOf(opts.rank):Math.floor(Math.random()*(top+1));
   const life=rand(...GATE_RULES.life),gate={id:this.nextId++,x:Math.round(pt.x),y:Math.round(pt.y),district:pt.district,red,rank:RANKS[clamp(rankIdx,0,5)],life,maxLife:life,forming:opts.instant?0:GATE_RULES.forming,age:0};gate.theme=(opts.theme&&themeById(opts.theme)?opts.theme:pickTheme(gate.rank).id);
-  this.list.push(gate);if(!opts.silent){g.message(`⚠ GATE ${red?'VERMELHO':'AZUL'} RANK ${gate.rank} DETECTADO · ${gate.district}`);g.sound.play('alert')}return gate}
+  this.list.push(gate);if(!opts.silent){g.message(`⚠ GATE ${red?'VERMELHO':'AZUL'} RANK ${gate.rank} DETECTADO · ${gate.district}`);g.sound.play('alert');if(opts.instant&&red)g.sound.play('horn')}return gate}
  nearest(p,r=115){return this.list.filter(gate=>gate.forming<=0&&dist(gate,p)<r).sort((a,b)=>dist(a,p)-dist(b,p))[0]||null}
  remove(gate){this.list=this.list.filter(o=>o!==gate)}
  draw(c,t,world){
@@ -1629,14 +1713,15 @@ const BOSS_TYPES={
 class Enemy{
  constructor(x,y,type,level,boss=false,opts={}){
   const def=boss?(BOSS_TYPES[type]||BOSS_TYPES.E):(MONSTER_TYPES[type]||MONSTER_TYPES.goblin),red=!!opts.red;
-  Object.assign(this,{x,y,home:{x,y},alerted:false,type,level,boss,def,name:def.name,art:def.art,radius:def.radius,speed:def.speed,aggro:def.aggro,red,dmgMult:red?1.3:1,cool:0,flash:0,stun:0,facing:1,state:'chase',stateT:0,current:null,animT:rand(0,4)});
+  Object.assign(this,{x,y,home:{x,y},alerted:false,type,level,boss,def,name:def.name,art:def.art,radius:def.radius,speed:def.speed,aggro:def.aggro,red,dmgMult:red?1.3:1,cool:0,flash:0,stun:0,facing:1,state:'chase',stateT:0,current:null,animT:rand(0,4),phaseIdx:1,elite:null,eliteName:null,slowed:0});
   this.maxhp=Math.round((def.hp[0]+def.hp[1]*level)*(red?1.35:1));this.hp=this.maxhp;
   this.attacks=def.attacks.map(a=>({...a,cd:rand(.4,1.4)+(a.kind==='super'?6:0)}));
  }
  get range(){return Math.max(...this.attacks.map(a=>a.range))}
- damageOf(a){return Math.round((a.damage[0]+a.damage[1]*this.level)*this.dmgMult)}
+ damageOf(a){const pm=this.boss?(this.phaseIdx>=3?1.3:this.phaseIdx>=2?1.15:1):1;return Math.round((a.damage[0]+a.damage[1]*this.level)*this.dmgMult*pm)}
  update(dt,g){
-  this.flash-=dt;this.stun-=dt;this.animT+=dt;for(const a of this.attacks)a.cd-=dt;
+  this.flash-=dt;this.stun-=dt;this.animT+=dt;this.slowed=Math.max(0,(this.slowed||0)-dt);for(const a of this.attacks)a.cd-=dt;
+  if(this.boss){const f=this.hp/this.maxhp;const ph=f<=.2?3:f<=.5?2:1;if(ph!==this.phaseIdx){this.phaseIdx=ph;g.bossPhase&&g.bossPhase(this,ph)}}
   if(this.bleed>0){this.bleed-=dt;this.bleedTick=(this.bleedTick||0)-dt;if(this.bleedTick<=0){this.bleedTick=.5;g.hit(this,3+g.player.stats.INT,false);if(!g.enemies.includes(this))return}}
   if(this.stun>0){if(this.state!=='chase'){this.state='chase';this.current=null}return}
   // Room-based awareness: a monster only notices targets standing in its own room/corridor (or,
@@ -1656,7 +1741,7 @@ class Enemy{
   const ready=this.attacks.filter(a=>a.cd<=0&&d<=a.range&&d>=(a.minRange||0)).sort((a,b)=>b.id-a.id)[0];
   if(ready){this.state='windup';this.current=ready;this.stateT=ready.windup;this.aim=ang;this.aimPos={x:p.x,y:p.y};ready.cd=ready.cooldown;for(const o of this.attacks)o.cd=Math.max(o.cd,.35);
    if(ready.kind==='super'){g.message(`⚠ ${this.name} · ${ready.name}`);g.shake(7,.5);g.sound.play('alert')}return}
-  const keep=this.attacks[0].range*.72;if(d>keep){const sp=this.speed*(this.slowed>0?.6:1);g.moveActor(this,Math.cos(ang)*sp*dt,Math.sin(ang)*sp*dt)}
+  const keep=this.attacks[0].range*.72;if(d>keep){const pm=this.boss?(this.phaseIdx>=3?1.3:this.phaseIdx>=2?1.15:1):1;const sp=this.speed*pm*(this.slowed>0?.6:1)*(this.elite==='VELOZ'?1.45:1);g.moveActor(this,Math.cos(ang)*sp*dt,Math.sin(ang)*sp*dt)}
  }
 }
 class Boss extends Enemy{constructor(x,y,type,level,name,opts={}){super(x,y,type,level,true,opts);if(name)this.name=name}}
@@ -1682,10 +1767,13 @@ function normalizeShadow(d,lvl=1){if(!d.type){const b=Object.entries(BOSS_TYPES)
 class ShadowSoldier{
  constructor(data,i,pos){const g=game,p=g.player;normalizeShadow(data,p.level);this.data=data;this.def=shadowDef(data);this.type=data.type||'shadow';this.boss=data.boss;this.name=data.name;this.art=this.def.art;this.radius=this.def.radius;this.isShadow=true;this.slot=i;
   const sp=pos||{x:p.x,y:p.y};this.x=sp.x;this.y=sp.y;this.cool=0;this.state='FOLLOW';this.regen=0;this.facing=1;this.animT=rand(0,4);this.act=null;this.hurtT=0;
-  this.attacks=this.def.attacks.map(a=>({...a,cd:rand(.2,.8)+(a.kind==='super'?4:0)}));this.refresh();this.hp=this.maxhp}
+  this.unique=UNIQUE_SHADOWS[data.type]||null;if(this.unique){this.data.unique=this.unique.key;this.name=this.unique.name}
+  this.attacks=this.def.attacks.map(a=>({...a,cd:rand(.2,.8)+(a.kind==='super'?4:0)}));
+  if(this.unique&&this.unique.key==='igris')this.attacks.push(ATK(4,'Corte Carmesim','lunge',{range:240,minRange:60,damage:[26,3],windup:.3,recover:.4,cooldown:4,dash:680,dashTime:.3}));
+  this.refresh();this.hp=this.maxhp}
  get level(){return this.data.level}
- get power(){return 1+game.player.stats.INT*.02}
- get speed(){return Math.max(125,this.def.speed*1.15)}
+ get power(){return (1+game.player.stats.INT*.02)*game.shadowPowerMult()}
+ get speed(){return Math.max(125,this.def.speed*1.15*(this.unique&&this.unique.mod.speed||1))}
  refresh(){const d=this.def;this.maxhp=Math.round((d.hp[0]+d.hp[1]*this.level)*this.power)}
  damageOf(a){return Math.round((a.damage[0]+a.damage[1]*this.level)*this.power)}
  gainXP(e,g){const d=this.data;if(d.level>=ARMY_RULES.maxLevel)return;d.xp+=(e.boss?60:10)+e.level*3;let up=false;while(d.xp>=ARMY_RULES.xpNeed(d.level)&&d.level<ARMY_RULES.maxLevel){d.xp-=ARMY_RULES.xpNeed(d.level);d.level++;up=true}
@@ -1697,15 +1785,21 @@ class ShadowSoldier{
   // Left behind (walls, long dash, other room): re-materialise on a free spot next to the master.
   if(dist(this,p)>ARMY_RULES.leash){const sp=g.findFreeSpot(p.x,p.y,this.radius,40,220,{los:true,avoid:g.soldiers.filter(s=>s!==this),sep:28,angle:(p.angle||0)+Math.PI});if(sp){g.particles.burst(this.x,this.y,'#3b1466',10,{speed:60});this.x=sp.x;this.y=sp.y;this.act=null;g.particles.burst(this.x,this.y-10,'#a855f7',16,{speed:90,lift:30})}}
   if(this.act){this.runAction(dt,g);return}
-  // Soft separation so shadows spread out instead of stacking on the same pixel.
-  for(const o of g.soldiers){if(o===this||o.state==='REGENERATE')continue;const dx=this.x-o.x,dy=this.y-o.y,dd=Math.hypot(dx,dy)||.01,min=(this.radius+o.radius)*.85;if(dd<min){const push=Math.min(60*dt,(min-dd)*.5);g.moveActor(this,dx/dd*push,dy/dd*push)}}
-  const target=g.enemies.filter(e=>dist(e,this)<ARMY_RULES.seek&&g.shadowCanTarget(e)).sort((a,b)=>dist(a,this)-dist(b,this))[0];
+  // Separação inteligente: círculo igual para todas as sombras; chefes têm o seu maior.
+  for(const o of g.soldiers){if(o===this||o.state==='REGENERATE')continue;const dx=this.x-o.x,dy=this.y-o.y,dd=Math.hypot(dx,dy)||.01;const min=(this.boss||o.boss)?Math.max(this.radius,o.radius)*1.15:24;if(dd<min){const push=Math.min(90*dt,(min-dd)*.6);g.moveActor(this,dx/dd*push,dy/dd*push)}}
+  {const dx=this.x-p.x,dy=this.y-p.y,dd=Math.hypot(dx,dy)||.01;if(dd<22){g.moveActor(this,dx/dd*80*dt,dy/dd*80*dt)}}
+  // ORDEM · MANTER POSIÇÃO: a sombra segura a posição e não persegue.
+  if(g.armyOrder==='HOLD'){this.state='HOLD';return}
+  // ATACAR prioriza o alvo do jogador; DEFENDER só engaja o que chega perto dele.
+  const pt=g.aimTarget?g.aimTarget():null;let pool=g.enemies.filter(e=>g.shadowCanTarget(e));
+  if(g.armyOrder==='DEFEND')pool=pool.filter(e=>dist(e,p)<380);
+  const target=pool.filter(e=>dist(e,this)<ARMY_RULES.seek).sort((a,b)=>{if(pt&&(a===pt)!==(b===pt))return a===pt?-1:1;return dist(a,this)-dist(b,this)})[0];
   if(target){const d=dist(this,target),ang=Math.atan2(target.y-this.y,target.x-this.x);if(Math.abs(target.x-this.x)>3)this.facing=target.x>this.x?1:-1;
    const ready=this.attacks.filter(a=>a.cd<=0&&d<=a.range+target.radius*.5&&d>=(a.minRange||0)).sort((a,b)=>b.id-a.id)[0];
    if(ready){this.state='ATTACK';ready.cd=ready.cooldown*.9;for(const o of this.attacks)o.cd=Math.max(o.cd,.3);this.act={a:ready,phase:'windup',t:ready.windup*.6,aim:ang,tg:target,pos:{x:target.x,y:target.y}};return}
    this.state='ENGAGE';const keep=this.attacks[0].range*.7+target.radius*.4;if(d>keep)g.moveActor(this,Math.cos(ang)*this.speed*dt,Math.sin(ang)*this.speed*dt);return}
   // Formation behind the player; slots that fall inside a wall collapse onto the player.
-  this.state='FOLLOW';const n=Math.max(1,g.soldiers.length),row=Math.floor(i/6),a0=(p.angle||0)+Math.PI+((i%6)-(Math.min(6,n)-1)/2)*.55,r=58+row*36;
+  this.state='FOLLOW';const n=Math.max(1,g.soldiers.length),row=Math.floor(i/6),a0=(p.angle||0)+Math.PI+((i%6)-(Math.min(6,n)-1)/2)*.55,r=(g.armyOrder==='DEFEND'?44:58)+row*34;
   let goal={x:p.x+Math.cos(a0)*r,y:p.y+Math.sin(a0)*r*.8};if(!g.isWalkable(goal.x,goal.y,Math.min(this.radius,20)))goal={x:p.x,y:p.y};
   const d=dist(this,goal);if(Math.abs(goal.x-this.x)>3&&d>8)this.facing=goal.x>this.x?1:-1;
   if(d>(goal.x===p.x&&goal.y===p.y?40:8)){const sp=this.speed*(d>220?1.5:1);g.moveActor(this,(goal.x-this.x)/d*Math.min(sp*dt,d),(goal.y-this.y)/d*Math.min(sp*dt,d))}}
@@ -1715,7 +1809,7 @@ class ShadowSoldier{
    for(const e of [...g.enemies])if(!A.hit.has(e)&&dist(this,e)<this.radius+e.radius+10){A.hit.add(e);g.hit(e,this.damageOf(a),false,this,A.aim)}
    if(A.t<=0){A.phase='recover';A.t=a.recover*.6}return}
   if(A.t<=0){this.act=null;this.state='ENGAGE'}}
- hurt(amount,g){if(this.state==='REGENERATE')return;this.hp-=amount;this.hurtT=.15;if(this.hp<=0){this.hp=0;this.act=null;this.state='REGENERATE';this.regen=ARMY_RULES.regen;g.particles.burst(this.x,this.y,'#a855f7',20)}}
+ hurt(amount,g){if(this.state==='REGENERATE')return;const armor=this.unique&&this.unique.mod.armor||0;this.hp-=amount*(1-armor);this.hurtT=.15;if(this.hp<=0){this.hp=0;this.act=null;this.state='REGENERATE';this.regen=ARMY_RULES.regen;g.particles.burst(this.x,this.y,'#a855f7',20)}}
 }
 const FOG_RULES={perAdjacent:15};
 const GATE_MONSTERS=idx=>idx<2?['goblin','wolf','spider']:idx<4?['orc','orc','demon']:idx===4?['bear','wolf']:['demon','orc'];
@@ -1723,18 +1817,23 @@ const fmtTime=s=>`${String(Math.floor(Math.max(0,s)/60)).padStart(2,'0')}:${Stri
 function attackLine(a,level){const kind={melee:'Corpo a corpo',slam:'Área',projectile:'Projétil',lunge:'Investida',super:'Super'}[a.kind];return `<div class="atk-row ${a.kind==='super'?'super':''}"><b>ATQ ${a.id}</b><span>${a.name.replace('SUPER · ','')}</span><small>${kind} · alcance ${a.radius||a.range} · dano ${Math.round(a.damage[0]+a.damage[1]*level)}</small></div>`}
 function monsterCard(def,level,boss=false){return `<div class="beast ${boss?'boss':''}"><div class="beast-head"><b>${def.name}</b><span>${def.size}</span></div><div class="beast-stats"><span>HP <b>${Math.round(def.hp[0]+def.hp[1]*level)}</b></span><span>VEL <b>${def.speed}</b></span><span>ALCANCE <b>${Math.max(...def.attacks.map(a=>a.range))}</b></span></div>${def.attacks.map(a=>attackLine(a,level)).join('')}</div>`}
 class UIManager{static open(type){game.panel=type;let p=game.player,box=$('#modal');box.classList.remove('hidden');let content='';
- if(type==='status'){content=`<p>Nível ${p.level} · Rank ${p.rank} · EXP ${p.xp}/${p.level*100} <br>Pontos disponíveis: <b>${p.points}</b></p>`+Object.entries(p.stats).map(([k,v])=>`<div class="stat-row"><b>${k}</b><span>${v} <button class="action" data-stat="${k}">+</button></span></div>`).join('')+`<p class="muted">ATQ ${Math.floor(10+p.stats.FOR*3.5+weapons[p.weapon].damage)} · DEF ${Math.min(60,p.stats.VIT*.8).toFixed(1)}% · CRÍTICO ${(5+p.stats.PER*1.2).toFixed(1)}% · SOMBRAS ${game.army.length}/${armyCap(p)}<br>VISÃO NA DUNGEON: ${p.stats.PER>=FOG_RULES.perAdjacent?'SALAS ADJACENTES REVELADAS':`APENAS A SALA ATUAL (PER ${FOG_RULES.perAdjacent} revela salas adjacentes)`}</p>`}
- else if(type==='inventory'){content=`<p>OURO: <b>${p.gold} G</b></p>${p.owned.map(i=>`<div class="item-row"><b>⚔ ${weapons[i].name}</b><span>ATQ +${weapons[i].damage} <button class="action" data-equip="${i}">${i===p.weapon?'EQUIPADA':'EQUIPAR'}</button></span></div>`).join('')}<div class="item-row"><b>♥ Poção de vida</b><span>${p.hppots} unidades</span></div><div class="item-row"><b>♦ Poção de mana</b><span>${p.mppots} unidades</span></div>`}
+ if(type==='status'){content=`<p>Nível ${p.level} · Rank ${p.rank} · ${CLASSES[p.playerClass].name} · EXP ${p.xp}/${p.level*100} <br>Pontos: <b>${p.points}</b> · Talentos: <b>${p.talentPoints||0}</b> <button class="action" data-do="talents">ÁRVORE DE TALENTOS</button></p>`+Object.entries(p.stats).map(([k,v])=>`<div class="stat-row"><b>${k}</b><span>${v} <button class="action" data-stat="${k}">+</button></span></div>`).join('')+`<p class="muted">ATQ ${Math.floor(p.atk)} · DEF ${Math.min(50,p.armor).toFixed(0)}% · CRÍTICO ${game.critChance().toFixed(1)}% · SOMBRAS ${game.army.length}/${game.shadowCap()}<br>VISÃO NA DUNGEON: ${p.stats.PER>=FOG_RULES.perAdjacent?'SALAS ADJACENTES REVELADAS':`APENAS A SALA ATUAL (PER ${FOG_RULES.perAdjacent} revela salas adjacentes)`}<br>PONTOS DE CAÇADOR: ${(game.hunter||{}).points||0} · RANK DA ASSOCIAÇÃO ${(game.hunter||{}).rank||'E'}</p>`+(p.level>=CLASS_CHANGE_LEVEL&&p.playerClass<1?`<p style="color:#ffd27a">★ MUDANÇA DE CLASSE DISPONÍVEL · ENFRENTE O CARTENON (DUNGEON C)</p>`:'')}
+ else if(type==='inventory'){content=`<p>OURO: <b>${p.gold} G</b></p>${p.owned.map(i=>`<div class="item-row"><b>⚔ ${weapons[i].name}</b><span>ATQ +${weapons[i].damage} <button class="action" data-equip="${i}">${i===p.weapon?'EQUIPADA':'EQUIPAR'}</button></span></div>`).join('')}`+(p.items&&p.items.length?p.items.map(id=>{const it=ITEMS[id];if(!it)return'';const eq=p.equipped[it.slot]===id;return `<div class="item-row"><b style="color:${it.color}">★ ${it.name}</b><span>${it.rarity} · ${it.slot==='cape'?'DEF +'+it.armor:(it.damage?'ATQ +'+it.damage:'')} <button class="action" data-item-equip="${id}">${eq?'EQUIPADO':'EQUIPAR'}</button></span></div>`}).join(''):'')+`<div class="item-row"><b>♥ Poção de vida</b><span>${p.hppots} unidades</span></div><div class="item-row"><b>♦ Poção de mana</b><span>${p.mppots} unidades</span></div><button class="action" data-do="export">EXPORTAR SAVE (CÓDIGO)</button><button class="action" data-do="import">IMPORTAR SAVE</button>`}
+ else if(type==='talents'){const T=TALENTS;content=`<p>Talentos disponíveis: <b>${p.talentPoints||0}</b> · Suba de nível para ganhar mais.</p>`+Object.entries(T).map(([attr,list])=>`<h2>${attr}</h2>`+list.map(t=>{const lv=talentLevel(t.id);return `<div class="item-row"><b>${t.name}</b><span>NV ${lv}/${t.max} · ${t.desc} <button class="action" data-talent="${t.id}" ${lv>=t.max?'disabled':''}>+1</button></span></div>`}).join('')).join('')+`<button class="action" data-open="status">VOLTAR</button>`}
+ else if(type==='contracts'){const cs=game.contracts||[];content=`<p>ASSOCIAÇÃO DOS CAÇADORES · Rank do caçador: <b>${(game.hunter||{}).rank||'E'}</b> (${(game.hunter||{}).points||0} pts)</p>`+(cs.length?cs.map((c,i)=>`<div class="item-row"><b>RANK ${c.rank} · CONTRATO DE ABATES</b><span>${c.kills}/${c.need} abates · ${c.reward} G · 20 pts caçador <button class="action" data-contract="${i}" ${c.done||c.taken?'disabled':''}>${c.done?'CONCLUÍDO':c.taken?'EM ANDAMENTO':'ACEITAR'}</button></span></div>`).join(''):'<p class="muted">Nenhum contrato no momento. Volte em alguns instantes.</p>')+`<button class="action" data-open="status">FECHAR</button>`}
+ else if(type==='export'){content=`<p>Cole este código em outro aparelho (PC ↔ celular):</p><textarea readonly style="width:100%;height:90px;font-size:11px">${SaveSystem.export(game)}</textarea><button class="action" data-open="inventory">VOLTAR</button>`}
+ else if(type==='import'){content=`<p>Cole o código de save:</p><textarea id="importCode" style="width:100%;height:90px;font-size:11px"></textarea><button class="action" data-do="importRun">IMPORTAR</button>`}
  else if(type==='army'){const cap=armyCap(p);game.army.forEach(s=>normalizeShadow(s,p.level));content=`<p>SLOTS: <b>${game.army.length} / ${cap}</b> · ${game.summoned?'INVOCADOS':'NA RESERVA'}</p><p class="muted">Capacidade = ${ARMY_RULES.base} + INT/${ARMY_RULES.perINT} + 1 a cada ${ARMY_RULES.perLevel} níveis. Próximo slot: INT ${(Math.floor(p.stats.INT/ARMY_RULES.perINT)+1)*ARMY_RULES.perINT} ou nível ${(Math.floor((p.level-1)/ARMY_RULES.perLevel)+1)*ARMY_RULES.perLevel+1}.</p>`+(game.army.length?(()=>{const cost=armySummonCost(p,game.army),up=armyUpkeep(p,game.army),drain=game.armyDrain(),net=MP_REGEN-(game.summoned?drain:up);return `<div class="army-mana"><div><small>INVOCAR</small><b>${cost} MP</b></div><div><small>MANUTENÇÃO</small><b>−${fmtRate(game.summoned?drain:up)} MP/s</b></div><div><small>SALDO C/ REGEN.</small><b class="${net<0?'neg':'pos'}">${net<0?'−':'+'}${fmtRate(Math.abs(net))} MP/s</b></div><div><small>${game.summoned?'TEMPO ATIVO':'DURAÇÃO C/ MP ATUAL'}</small><b>${game.summoned?fmtTime(game.armyT||0):net<0?fmtTime(Math.max(0,p.mp-cost)/-net):'∞'}</b></div></div><p class="muted">A invocação cobra o custo inicial e cada sombra em campo consome mana por segundo (sombras caídas em regeneração não consomem). Sem mana, o exército retorna sozinho. INT reduz todos os custos (−${Math.round((1-armyManaMult(p))*100)}% agora).</p>`})():'')+(game.army.length?game.army.map((s,i)=>{const d=shadowDef(s),m=shadowMana(s,p);return `<div class="item-row"><b>♟ ${s.name}<small class="muted"> · ${d.size||''} · ${d.attacks.map(a=>a.name.replace('SUPER · ','★ ')).join(' / ')}</small><i class="mana-tag">INVOCAR ${Math.round(m.summon)} MP · MANUTENÇÃO −${fmtRate(m.upkeep)} MP/s</i></b><span>${s.rank} · LV ${s.level} · ${s.kills} abates <button class="action" data-dismiss="${i}">DISPENSAR</button></span></div>`}).join(''):'<p class="muted">Derrote inimigos e pressione E perto de seus corpos para extrair sombras.</p>')+`<button class="action" data-do="summon">INVOCAR / GUARDAR [R]</button>`}
  else if(type==='shop'){content=game.world.kind!=='hub'?'<p>A loja está disponível apenas na cidade.</p>':`<p>OURO: ${p.gold} G</p>`+weapons.map((w,i)=>`<div class="item-row"><b>${w.name} <small>ATQ +${w.damage}</small></b><button class="action" data-buy="${i}">${i===p.weapon?'EQUIPADA':p.owned.includes(i)?'EQUIPAR':w.price+' G'}</button></div>`).join('')+`<button class="action" data-potion="hp">POÇÃO HP · 40 G</button><button class="action" data-potion="mp">POÇÃO MP · 40 G</button>`}
  else if(type==='gate'){const gate=game.selectedGate;if(!gate||!game.gates.list.includes(gate)){content='<p>Este gate já se fechou.</p>'}else{const idx=RANKS.indexOf(gate.rank),boss=BOSS_TYPES[gate.rank],th=themeById(gate.theme),types=[...new Set(th?th.mon:GATE_MONSTERS(idx))];
   content=`<div class="gate-card ${gate.red?'red':'blue'}"><div class="gate-rank">${gate.rank}</div><div><b>${gate.red?'GATE VERMELHO':'GATE AZUL'} · RANK ${gate.rank}</b><small>${gate.district} · FECHA EM <span id="gateTime">${fmtTime(gate.life)}</span></small><small>${gate.red?'Monstros +35% HP e +30% dano · recompensas x2':'Dificuldade padrão · recompensas x1'}</small></div></div>`+
   (th?`<div class="gate-theme" style="--th:${th.pal.acc}"><small>${th.arc.toUpperCase()}</small><b>${th.name}</b><p>${th.desc}</p>${th.hazards?`<em>⚠ ${th.hazards.map(h=>h.name).join(' · ')}</em>`:''}</div>`:'')+`<p class="muted">MONSTROS: ${types.map(t=>MONSTER_TYPES[t].name).join(' · ')} — CHEFE: <b>${boss.name}</b></p><button class="action wide" data-gate="${gate.rank}" data-red="${gate.red?1:0}" data-theme="${gate.theme||''}">ENTRAR NO GATE</button>`}}
- else if(type==='bestiary'){const lv=1+Math.max(0,RANKS.indexOf(game.world.rank||'E'))*8;content=`<p class="muted">Atributos individuais por tipo (nível ${lv}). Ataque 3 (Super) é exclusivo dos chefes.</p><h2>MONSTROS</h2>`+Object.values(MONSTER_TYPES).map(d=>monsterCard(d,lv)).join('')+'<h2>CHEFES</h2>'+RANKS.map((r,i)=>monsterCard(BOSS_TYPES[r],3+i*8,true)).join('')}
+ else if(type==='bestiary'){const lv=1+Math.max(0,RANKS.indexOf(game.world.rank||'E'))*8;const kills=t=>((game.bestiary||{})[t]||{}).kills||0;const badge=t=>{const k=kills(t);return `<i class="mana-tag" style="color:${k>=50?'#ffd27a':'#8fb4c8'}">${k>=50?'✔ COMPLETO · +4% DANO':k+' / 50 abates'}</i>`};
+  content=`<p class="muted">Atributos por tipo (nível ${lv}). 50 abates do mesmo tipo concedem +4% de dano contra ele. Ataque 3 (Super) é exclusivo dos chefes.</p><h2>MONSTROS</h2>`+Object.entries(MONSTER_TYPES).map(([k,d])=>`<div class="beast">${badge(k)}${monsterCard(d,lv)}</div>`).join('')+'<h2>CHEFES</h2>'+RANKS.map((r,i)=>`<div class="beast boss">${badge(r)}${monsterCard(BOSS_TYPES[r],3+i*8,true)}</div>`).join('')}
  else if(type==='pause'){content='<p>O sistema está aguardando.</p><button class="action" data-do="resume">CONTINUAR</button><button class="action" data-do="save">SALVAR JOGO</button><button class="action" data-open="menu">CONFIGURAÇÕES</button>'}
  else if(type==='menu'){content=Mobile.menuHTML()}
  else if(type==='dead'){content='<p>Você foi derrotado. O sistema lhe concedeu uma nova chance.</p><button class="action" data-do="revive">RETORNAR À ASSOCIAÇÃO</button>'}
- box.innerHTML=`<div class="modal-box"><div class="modal-title">◈ &nbsp; ${ {status:'STATUS',inventory:'INVENTÁRIO',army:'EXÉRCITO DAS SOMBRAS',shop:'LOJA DO SISTEMA',gate:'GATE DETECTADO',bestiary:'BESTIÁRIO DO SISTEMA',pause:'SISTEMA PAUSADO',menu:'MENU DO SISTEMA',dead:'VOCÊ FOI DERROTADO'}[type]} ${type==='dead'?'':'<button data-do="close">×</button>'}</div>${content}</div>`}
+ box.innerHTML=`<div class="modal-box"><div class="modal-title">◈ &nbsp; ${ {status:'STATUS',inventory:'INVENTÁRIO',army:'EXÉRCITO DAS SOMBRAS',shop:'LOJA DO SISTEMA',gate:'GATE DETECTADO',bestiary:'BESTIÁRIO DO SISTEMA',pause:'SISTEMA PAUSADO',menu:'MENU DO SISTEMA',dead:'VOCÊ FOI DERROTADO',talents:'ÁRVORE DE TALENTOS',contracts:'CONTRATOS DA ASSOCIAÇÃO',export:'EXPORTAR SAVE',import:'IMPORTAR SAVE'}[type]} ${type==='dead'?'':'<button data-do="close">×</button>'}</div>${content}</div>`}
  static close(){game.panel=null;$('#modal').classList.add('hidden')}}
 // HUD panels can be minimised individually ([−]/[+]) or all at once (H / HUD button).
 // Collapsed state persists in localStorage so the screen stays as clean as the player left it.
@@ -1754,7 +1853,7 @@ class HudManager{
 // first touch), shows a floating analog stick + action cluster, compacts the HUD, auto-aims attacks
 // and offers browser fullscreen with landscape lock. Zoom scales the canvas so small/short screens
 // still show enough of the world; "light" quality drops glows and halves particles when FPS sags.
-const Settings={key:'shadow-protocol-settings',d:{touch:'auto',zoom:'auto',quality:'auto',ctl:1,alpha:.9,lefty:false,vibrate:true,autoFull:true},
+const Settings={key:'shadow-protocol-settings',d:{touch:'auto',zoom:'auto',quality:'auto',ctl:1,alpha:.9,lefty:false,vibrate:true,autoFull:true,shake:true,colorblind:false,bigtext:false,fps:false,music:true,sfx:true,ultralight:false},
  load(){try{Object.assign(this.d,JSON.parse(localStorage.getItem(this.key))||{})}catch{}return this},
  save(){try{localStorage.setItem(this.key,JSON.stringify(this.d))}catch{}}};
 function liveGame(){try{return game}catch(e){return null}}
@@ -1773,7 +1872,7 @@ const Mobile={on:false,light:false,lastTouch:-1e9,stickId:null,cache:{},
    for(const ev of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(ev,()=>{this.syncFull();setTimeout(()=>{const g=liveGame();if(g)g.resize()},120)})}
   const skip=$('#rotateSkip');if(skip)skip.onclick=()=>{document.body.classList.add('allow-portrait')};
   this.apply();if(Settings.d.quality==='light')this.setLight(true)},
- apply(){const b=typeof document!=='undefined'&&document.body,d=Settings.d;if(b&&b.classList){b.classList.toggle('touch',this.on);b.classList.toggle('lefty',!!d.lefty);if(b.style&&b.style.setProperty){b.style.setProperty('--ctl',d.ctl);b.style.setProperty('--ctl-alpha',d.alpha)}}
+ apply(){const b=typeof document!=='undefined'&&document.body,d=Settings.d;if(b&&b.classList){b.classList.toggle('touch',this.on);b.classList.toggle('lefty',!!d.lefty);b.classList.toggle('colorblind',!!d.colorblind);b.classList.toggle('bigtext',!!d.bigtext);b.classList.toggle('ultralight',!!d.ultralight);if(b.style&&b.style.setProperty){b.style.setProperty('--ctl',d.ctl);b.style.setProperty('--ctl-alpha',d.alpha)}}
   const g=liveGame(),t=$('#touch');if(t&&t.classList)t.classList.toggle('hidden',!this.on||!(g&&g.started));
   if(this.on)this.bind();this.syncFull();if(g&&g.input){g.input.touchMode=this.on;g.resize()}},
  // Canvas pixels per CSS pixel: AUTO keeps ~460 world px of height visible on short phone screens.
@@ -1790,20 +1889,31 @@ const Mobile={on:false,light:false,lastTouch:-1e9,stickId:null,cache:{},
  onStart(){if(this.on&&Settings.d.autoFull&&!this.isFull()&&!this.standalone())this.enterFull()},
  setLight(v){this.light=v;const b=document.body;if(b&&b.classList)b.classList.toggle('lite',v);
   try{if(v)Object.defineProperty(ctx,'shadowBlur',{configurable:true,get:()=>0,set:()=>{}});else delete ctx.shadowBlur}catch{}
-  const g=liveGame();if(g&&g.particles){g.particles.density=v?.5:1;g.particles.cap=v?450:900}},
+  const g=liveGame();if(g&&g.particles){g.particles.density=v?.35:1;g.particles.cap=v?300:900}
+  if(v&&g&&g.drawDarkness)g._darkOff=true;else if(g)g._darkOff=false},
  perf(dt){const q=Settings.d.quality;if(q!=='auto'||this.light||!game.started||game.panel)return;this.ema=(this.ema||1/60)*.95+dt*.05;
   if(this.ema>1/38){this.slowT=(this.slowT||0)+dt;if(this.slowT>3){this.setLight(true);game.message('MODO LEVE ATIVADO PARA MELHORAR O DESEMPENHO')}}else this.slowT=0},
  set(k,v){const d=Settings.d;if(k==='full'){this.toggleFull();return}
   if(k==='hudmin'){for(const el of document.querySelectorAll('[data-hud]'))HudManager.state[el.dataset.hud]=true;for(const el of document.querySelectorAll('[data-hud]'))HudManager.apply(el.dataset.hud);HudManager.save();return}
   if(k==='hudreset'){HudManager.state={clean:false};for(const el of document.querySelectorAll('[data-hud]'))HudManager.apply(el.dataset.hud);HudManager.applyClean();HudManager.save();return}
   d[k]=v==='true'?true:v==='false'?false:(v!==''&&!isNaN(+v))?+v:v;Settings.save();
-  if(k==='quality')this.setLight(v==='light');if(k==='touch'){this.on=this.detect();HudManager.init()}this.apply()},
+  if(k==='quality')this.setLight(v==='light');if(k==='ultralight'){this.setLight(!!v||Settings.d.quality==='light');const g=liveGame();if(g&&g.particles){g.particles.density=v?.25:1;g.particles.cap=v?180:900}}if(k==='touch'){this.on=this.detect();HudManager.init()}
+  if(k==='music'||k==='sfx'){const g=liveGame();if(g&&g.music)g.music.enabled=Settings.d.music;if(g&&g.sound)g.sound.enabled=Settings.d.sfx}
+  if(k==='fps'){const g=liveGame();if(g)g.fps=Settings.d.fps?1:0}
+  this.apply()},
  menuHTML(){const d=Settings.d,opt=(k,list)=>list.map(([v,l])=>`<button class="action opt ${String(d[k])===String(v)?'on':''}" data-set="${k}" data-val="${v}">${l}</button>`).join(''),row=(t,h,n='')=>`<div class="set-row"><span>${t}${n?`<small>${n}</small>`:''}</span><div>${h}</div></div>`;
   return `<div class="menu-grid">${[['status','◈ STATUS'],['inventory','✚ INVENTÁRIO'],['army','♟ SOMBRAS'],['shop','✦ LOJA'],['bestiary','☠ BESTIÁRIO']].map(([k,l])=>`<button class="action big" data-open="${k}">${l}</button>`).join('')}<button class="action big" data-do="save">▣ SALVAR</button></div>
   <h2>TELA</h2>${row('Tela cheia',`<button class="action" data-set="full">${this.isFull()?'SAIR DA TELA CHEIA':'ATIVAR TELA CHEIA'}</button>`,this.canFull()?'':'iPhone: Compartilhar → Adicionar à Tela de Início')}
   ${row('Tela cheia ao iniciar',opt('autoFull',[[true,'SIM'],[false,'NÃO']]))}
   ${row('Zoom da câmera',opt('zoom',[['auto','AUTO'],[.7,'70%'],[.85,'85%'],[1,'100%'],[1.2,'120%']]),'Menor = enxerga mais do mapa')}
   ${row('Qualidade gráfica',opt('quality',[['auto','AUTO'],['high','ALTA'],['light','LEVE']]),this.light?'Modo leve ativo':'')}
+  ${row('Perfil ultra leve',opt('ultralight',[[false,'DESLIGADO'],[true,'LIGADO']]),'Menos partículas, sem brilho e sem escuridão')}
+  ${row('Tremor de tela',opt('shake',[[true,'NORMAL'],[false,'REDUZIDO']]),'Acessibilidade: reduz o impacto visual')}
+  ${row('Filtro para daltônicos',opt('colorblind',[[false,'DESLIGADO'],[true,'LIGADO']]),'Hitboxes e telegraphs em azul/laranja')}
+  ${row('Texto maior',opt('bigtext',[[false,'DESLIGADO'],[true,'LIGADO']]),'Acessibilidade: interface e avisos maiores')}
+  ${row('Medidor de FPS',opt('fps',[[false,'DESLIGADO'],[true,'LIGADO']]),'Mostra os quadros por segundo no canto')}
+  ${row('Música do Sistema',opt('music',[[true,'LIGADA'],[false,'DESLIGADA']]),'Trilha procedural por tema de mapa')}
+  ${row('Efeitos sonoros',opt('sfx',[[true,'LIGADOS'],[false,'DESLIGADOS']]),'Sons espaciais de combate')}
   ${row('Interface',`<button class="action" data-set="hudmin">MINIMIZAR PAINÉIS</button><button class="action" data-set="hudreset">RESTAURAR</button>`)}
   <h2>CONTROLES DE TOQUE</h2>${row('Controles na tela',opt('touch',[['auto','AUTO'],['on','SEMPRE'],['off','NUNCA']]))}
   ${row('Tamanho dos botões',opt('ctl',[[.85,'P'],[1,'M'],[1.18,'G']]))}
@@ -1827,7 +1937,7 @@ const Mobile={on:false,light:false,lastTouch:-1e9,stickId:null,cache:{},
   for(const b of document.querySelectorAll('#touch [data-t]')){const t=b.dataset.t;
    b.addEventListener('contextmenu',e=>e.preventDefault());
    b.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();try{b.setPointerCapture(e.pointerId)}catch{}b.classList.add('down');this.buzz();
-    if(t==='attack'){game.input.touchAttack=true;game.key(' ')}else if(keyOf[t])game.key(keyOf[t]);else if(t==='menu'){if(game.started&&!game.panel)UIManager.open('menu');else if(game.panel&&game.panel!=='dead')UIManager.close()}else if(t==='hud')HudManager.toggleClean();else if(t==='fullscreen')this.toggleFull()});
+    if(t==='attack'){game.input.touchAttack=true;game.key(' ')}else if(keyOf[t])game.key(keyOf[t]);else if(t==='menu'){if(game.started&&!game.panel)UIManager.open('menu');else if(game.panel&&game.panel!=='dead')UIManager.close()}else if(t==='hud')HudManager.toggleClean();else if(t==='fullscreen')this.toggleFull();else if(t==='order'){game.cycleArmyOrder()}else if(t==='jinho'){game.story.jinho===2?game.spawnAlly(PEOPLE.hunters[2],'YOO JIN-HO'):game.message('JIN-HO AINDA NÃO SE JUNTOU A VOCÊ');UIManager.close()}});
    const up=()=>{b.classList.remove('down');if(t==='attack')game.input.touchAttack=false};b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up);b.addEventListener('lostpointercapture',up)}
   const it=$('#interact');if(it&&it.addEventListener)it.addEventListener('pointerdown',e=>{if(!this.on)return;e.preventDefault();this.buzz(12);game.key('e')})},
  // Per-frame touch HUD sync (writes the DOM only when a value changes).
@@ -1835,13 +1945,172 @@ const Mobile={on:false,light:false,lastTouch:-1e9,stickId:null,cache:{},
  sync(g,loc){if(!this.on||typeof document==='undefined')return;const p=g.player,c=this.cache;
   this.put('l','loc',loc,v=>{const e=$('#tLoc');if(e)e.textContent=v});
   this.put('h','hp',p.hppots,v=>{const e=$('#tHp');if(e)e.textContent=v});this.put('m','mp',p.mppots,v=>{const e=$('#tMp');if(e)e.textContent=v});
-  const cost=armySummonCost(p,g.army),dr=fmtRate(g.armyDrain());this.put('a','army',`${g.army.length}/${armyCap(p)}|${g.summoned}|${dr}|${!g.summoned&&(!g.army.length||p.mp<cost)}`,()=>{const e=$('#tArmy');if(e)e.textContent=g.summoned?`−${dr}/s`:`${g.army.length}/${armyCap(p)}`;const b=document.querySelector('#actions .summon');if(b&&b.classList){b.classList.toggle('active',!!g.summoned);b.classList.toggle('off',!g.summoned&&(!g.army.length||p.mp<cost))}});
+  const cost=armySummonCost(p,g.army),dr=fmtRate(g.armyDrain());this.put('a','army',`${g.army.length}/${g.shadowCap()}|${g.summoned}|${dr}|${!g.summoned&&(!g.army.length||p.mp<cost)}`,()=>{const e=$('#tArmy');if(e)e.textContent=g.summoned?`−${dr}/s`:`${g.army.length}/${g.shadowCap()}`;const b=document.querySelector('#actions .summon');if(b&&b.classList){b.classList.toggle('active',!!g.summoned);b.classList.toggle('off',!g.summoned&&(!g.army.length||p.mp<cost))}});
+  this.put('o','order',g.armyOrder,v=>{const b=document.querySelector('#actions .order');if(b){const s=b.querySelector('small'),bb=b.querySelector('b');if(s)s.textContent='ORDEM';if(bb)bb.textContent=g.armyOrder}});
+  this.put('j','jinho',String(g.story.jinho===2&&!g.ally),v=>{const b=document.querySelector('#actions .jinho');if(b&&b.classList)b.classList.toggle('off',!(g.story.jinho===2&&!g.ally))});
   [15,25,35].forEach((cost,i)=>this.put('s'+i,'sk'+i,p.mp<cost||p.cool>0.05?1:0,v=>{const b=document.querySelector('#actions .s'+(i+1));if(b&&b.classList)b.classList.toggle('off',!!v)}));
   const dmax=Math.max(.5,1.3-p.stats.AGI*.01),dk=Math.round(clamp(p.dashCd/dmax,0,1)*20)/20;this.put('d','dash',dk,v=>{const b=document.querySelector('#actions .dash');if(b&&b.style&&b.style.setProperty)b.style.setProperty('--cd',v)});
   this.put('q','pq',`${p.hppots>0&&p.hp<p.maxhp}|${p.mppots>0&&p.mp<p.maxmp}`,()=>{const h=document.querySelector('#actions .hp'),m=document.querySelector('#actions .mp');if(h&&h.classList)h.classList.toggle('off',!(p.hppots>0&&p.hp<p.maxhp));if(m&&m.classList)m.classList.toggle('off',!(p.mppots>0&&p.mp<p.maxmp))})}
 };
+// =============================================================================================
+// EXPANSÃO · sistemas de combate, sombras, progressão, mundo e interface
+// =============================================================================================
+// ---- Monstros de elite -----------------------------------------------------------------------
+const ELITE_MODS={
+ VELOZ:{name:'VELOZ',color:'#5ad8ff',blurb:'+45% de velocidade'},
+ BLINDADO:{name:'BLINDADO',color:'#d8e2ea',blurb:'-45% de dano sofrido'},
+ EXPLOSIVO:{name:'EXPLOSIVO',color:'#ff8a3a',blurb:'explode ao morrer'},
+};
+const ELITE_KEYS=Object.keys(ELITE_MODS);
+// ---- Sombras únicas (evolução de chefe) ------------------------------------------------------
+const SHADOW_RANKS=[[0,'Normal'],[10,'Elite'],[30,'Comandante'],[70,'General'],[150,'Supremo']];
+const shadowRankTitle=k=>{let t=SHADOW_RANKS[0][1];for(const [n,s] of SHADOW_RANKS)if(k>=n)t=s;return t};
+const UNIQUE_SHADOWS={
+ C:{key:'igris',name:'IGRIS',title:'Cavaleiro Carmesim',color:'#ff5a6a',ability:'Corte Carmesim',ablDesc:'Investida que atravessa fileiras',mod:{speed:1.2,range:22}},
+ A:{key:'tank',name:'TANK',title:'Urso de Guerra',color:'#8fd8ff',ability:'Pele de Ferro',ablDesc:'-30% de dano recebido',mod:{armor:.3}},
+ B:{key:'iron',name:'IRON',title:'Golem de Ferro',color:'#c9d2da',ability:'Provocar',ablDesc:'Atrai os ataques inimigos',mod:{armor:.18,speed:.92}},
+ S:{key:'beru',name:'BERU',title:'General da Colmeia',color:'#d06aff',ability:'Voo Predador',ablDesc:'+35% de velocidade',mod:{speed:1.35}},
+};
+// ---- Equipamentos com raridade ----------------------------------------------------------------
+const RARITY={COMUM:{name:'COMUM',color:'#9fb4c0'},RARO:{name:'RARO',color:'#4fd5ff'},EPICO:{name:'ÉPICO',color:'#c879ff'},LENDARIO:{name:'LENDÁRIO',color:'#ffb24a'}};
+const ITEMS={
+ kasaka:{id:'kasaka',name:'Adaga de Kasaka',slot:'weapon',rarity:'EPICO',damage:26,price:900,effect:{kind:'bleed',chance:.35},desc:'35% de chance de sangramento'},
+ barca:{id:'barca',name:'Espada do Barca',slot:'weapon',rarity:'LENDARIO',damage:60,price:2600,effect:{kind:'burn',chance:.4},desc:'40% de chance de queimadura'},
+ demoncape:{id:'demoncape',name:'Capa do Rei Demônio',slot:'cape',rarity:'LENDARIO',armor:14,price:2200,effect:{kind:'shadow',mult:1.25},desc:'+25% de poder das sombras'},
+};
+// ---- Árvore de talentos por atributo ----------------------------------------------------------
+const TALENTS={
+ FOR:{name:'FORÇA',desc:'Dano e impacto',nodes:[
+  {id:'for_dmg',name:'Lâminas Afiadas',max:5,desc:'+10% de dano por ponto'},
+  {id:'for_stun',name:'Impacto Atordoador',max:3,desc:'8% de chance de atordoar por ponto'}]},
+ AGI:{name:'AGILIDADE',desc:'Velocidade e esquiva',nodes:[
+  {id:'agi_speed',name:'Passo Leve',max:5,desc:'+3% de velocidade por ponto'},
+  {id:'agi_dash',name:'Recarga Rápida',max:3,desc:'-7% no tempo da esquiva por ponto'}]},
+ VIT:{name:'VITALIDADE',desc:'Vida e regeneração',nodes:[
+  {id:'vit_hp',name:'Corpo de Ferro',max:5,desc:'+8% de HP máximo por ponto'},
+  {id:'vit_regen',name:'Recuperação',max:3,desc:'+0,4 HP/s por ponto'}]},
+ INT:{name:'INTELIGÊNCIA',desc:'Sombras e mana',nodes:[
+  {id:'int_cap',name:'Mais Sombras',max:4,desc:'+1 slot de sombra por ponto'},
+  {id:'int_power',name:'Sombras Fortes',max:5,desc:'+6% de poder das sombras por ponto'}]},
+ PER:{name:'PERCEPÇÃO',desc:'Crítico e sangramento',nodes:[
+  {id:'per_crit',name:'Olho Crítico',max:5,desc:'+2% de crítico por ponto'},
+  {id:'per_bleed',name:'Sangramento',max:3,desc:'+12% de chance de sangramento por ponto'}]},
+};
+const talentLevel=id=>{const p=liveGame()&&liveGame().player;return p&&p.talents?(p.talents[id]||0):0};
+// ---- Missão diária do Sistema -----------------------------------------------------------------
+const DAILY_GOALS=[
+ {id:'pushups',name:'FLEXÕES',target:100,blurb:'abates'},
+ {id:'situps',name:'ABDOMINAIS',target:100,blurb:'dashes'},
+ {id:'run',name:'CORRIDA · 10 KM',target:10000,blurb:'metros'},
+];
+const CLASS_CHANGE_LEVEL=40;
+const CLASSES=['SHADOW MONARCH','MONARCA DAS SOMBRAS','SOBERANO DAS SOMBRAS'];
+// ---- Contratos da Associação e reavaliação de rank --------------------------------------------
+const CONTRACT_TIERS=[{rank:'E',need:8,reward:120},{rank:'D',need:10,reward:200},{rank:'C',need:12,reward:340},{rank:'B',need:12,reward:520},{rank:'A',need:14,reward:800},{rank:'S',need:15,reward:1200}];
+const HUNTER_THRESH=[0,60,160,320,560,900];
+// ---- Cutscenes (história, NPCs, missão) -------------------------------------------------------
+class Cutscene{constructor(lines,opts={}){this.lines=lines;this.i=0;this.t=0;this.opts=opts;this.done=false;this.zoom=opts.zoom||1.6;this.auto=opts.auto||0;this.slow=opts.slow??.22;game.cutscene=this}
+ current(){return this.lines[this.i]}
+ focus(){const o=this.opts,L=this.current();if(o.focus)return o.focus;if(L&&L.at)return L.at();return game.player}
+ advance(){if(this.done)return;this.i++;this.t=0;if(this.i>=this.lines.length){this.done=true;game.cutscene=null;const cb=this.opts.onDone;if(cb)cb()}}
+ update(dt){if(this.done)return;this.t+=dt;if(this.auto&&this.t>=this.auto)this.advance()}
+draw(c){const L=this.current();if(!L)return;const f=this.focus();const W=canvas.width,H=canvas.height;
+ // letterbox cinematográfico
+ c.save();c.fillStyle='#000000cc';c.fillRect(0,0,W,84);c.fillRect(0,H-150,W,150);
+ // retrato do falante (câmera vira para o rosto)
+ if(f&&f.x!==undefined){const cx=clamp(f.x-game.camera.x,60,W-60),cy=clamp(f.y-game.camera.y,120,H-190);c.save();c.globalAlpha=.85;c.strokeStyle='#3fd6ff';c.lineWidth=2;c.beginPath();c.arc(cx,cy,26,0,7);c.stroke();c.fillStyle='#07131b';c.beginPath();c.arc(cx,cy,24,0,7);c.fill();
+  const sp=(f.isAlly&&f.look)?game.sprites.person(f.look,f.facing===1?0:4,'idle0'):null;if(sp)c.drawImage(sp,Math.round(cx-24),Math.round(cy-40),48,48);else if(f.art){const im=game.sprites.monster(f.art,'idle0');if(im)c.drawImage(im.img,Math.round(cx-24),Math.round(cy-40),48,48)}
+  c.restore()}
+ c.fillStyle='#020810cc';c.fillRect(0,H-150,W,150);c.strokeStyle='#3fd6ff';c.lineWidth=1;c.beginPath();c.moveTo(0,H-150);c.lineTo(W,H-150);c.stroke();
+ c.font='bold 13px monospace';c.textAlign='left';c.fillStyle=L.color||'#7fe8ff';c.fillText(L.who||'SISTEMA',24,H-112);
+ c.font='15px monospace';c.fillStyle='#e8fbff';this.wrap(c,L.text,24,H-86,W-48,20);
+ c.font='10px monospace';c.fillStyle='#6fa8b8';c.fillText(this.i<this.lines.length-1?'[ E / ESPAÇO ] CONTINUAR':'[ E / ESPAÇO ] FECHAR',24,H-20);c.restore()}
+ wrap(c,text,x,y,maxW,lh){const words=String(text).split(' ');let line='',yy=y;for(const w of words){const t=line?line+' '+w:w;if(c.measureText(t).width>maxW){c.fillText(line,x,yy);line=w;yy+=lh}else line=t}if(line)c.fillText(line,x,yy)}}
+// ---- Aliado de história (Yoo Jin-ho) ----------------------------------------------------------
+class Ally{constructor(x,y,look,name){this.x=x;this.y=y;this.look=look;this.name=name||'YOO JIN-HO';this.dir=2;this.moving=false;this.anim=0;this.hp=220;this.maxhp=220;this.cool=0;this.speed=150;this.isAlly=true;this.radius=12;this.facing=1}
+ update(dt,g){this.anim+=dt;this.cool-=dt;const p=g.player,d=dist(this,p);
+  let target=g.enemies.filter(e=>dist(e,this)<340).sort((a,b)=>dist(a,this)-dist(b,this))[0];
+  if(target){const dd=dist(this,target),ang=Math.atan2(target.y-this.y,target.x-this.x);if(Math.abs(target.x-this.x)>3)this.facing=target.x>this.x?1:-1;
+   if(dd>60){this.x+=Math.cos(ang)*this.speed*dt;this.y+=Math.sin(ang)*this.speed*dt;this.moving=true}else{this.moving=false;if(this.cool<=0){this.cool=.7;g.hit(target,14+p.stats.FOR*1.5,false,null,ang);g.particles.burst(target.x,target.y-14,'#ffd27a',6,{angle:ang,spread:1.2,speed:180})}}}
+  else if(d>46){const ang=Math.atan2(p.y-this.y,p.x-this.x);this.x+=Math.cos(ang)*this.speed*1.2*dt;this.y+=Math.sin(ang)*this.speed*1.2*dt;this.moving=true;this.facing=p.x>this.x?1:-1}
+  else this.moving=false;
+  this.x=clamp(this.x,30,g.world.w-30);this.y=clamp(this.y,30,g.world.h-30)}
+ draw(c,g){const f=g.sprites.person(this.look,this.facing===1?0:4,this.moving?'walk'+(Math.floor(this.anim*10)%6):'idle'+(Math.floor(this.anim*1.6)%2));c.fillStyle='#0009';c.beginPath();c.ellipse(this.x,this.y+8,12,4,0,0,7);c.fill();c.drawImage(f,Math.round(this.x-32),Math.round(this.y-59));
+  c.font='bold 10px monospace';c.textAlign='center';c.fillStyle='#061019';c.fillText(this.name,this.x+1,this.y-62+1);c.fillStyle='#ffd27a';c.fillText(this.name,this.x,this.y-62);c.textAlign='left';
+  c.fillStyle='#182c37';c.fillRect(this.x-16,this.y-58,32,3);c.fillStyle='#ffd27a';c.fillRect(this.x-16,this.y-58,32*clamp(this.hp/this.maxhp,0,1),3)}
+ hurt(n,g){this.hp-=n;if(this.hp<=0){g.removeAlly();g.message(`${this.name} FOI DERROTADO`)}}}
+// ---- QTE decisivo (aperte a tecla na hora certa) ----------------------------------------------
+class QTE{constructor(opts={}){this.key=opts.key||' ';this.dur=opts.dur||1.5;this.t=0;this.zone=opts.zone||[.34,.66];this.label=opts.label||'APERTE ESPAÇO';this.onDone=opts.onDone;this.done=false;game.qte=this}
+ update(dt){if(this.done)return;this.t+=dt;if(this.t>=this.dur)this.finish(false)}
+ press(k){if(this.done||k!==this.key)return false;this.finish(this.t/this.dur>=this.zone[0]&&this.t/this.dur<=this.zone[1]);return true}
+ finish(ok){if(this.done)return;this.done=true;game.qte=null;if(this.onDone)this.onDone(ok)}}
+// ---- Tutorial interativo ----------------------------------------------------------------------
+const TUTORIAL_STEPS=[
+ {id:'move',text:'MOVA-SE · W A S D / SETAS / ANALÓGICO',check:g=>(g.tutMove||0)>1.1},
+ {id:'attack',text:'ATAQUE · CLIQUE ESQUERDO / ESPAÇO / BOTÃO ATAQUE',check:g=>(g.tutAttack||0)>=3},
+ {id:'dash',text:'ESQUIVE · SHIFT / BOTÃO ESQUIVA',check:g=>(g.tutDash||0)>=1},
+ {id:'summon',text:'INVOQUE AS SOMBRAS · R / BOTÃO SOMBRAS',check:g=>(g.tutSummon||0)>=1},
+ {id:'done',text:'TUTORIAL CONCLUÍDO · BOA CAÇADA',check:g=>(g.tutT||0)>1.6},
+];
+// ---- Nova cidade: BUSAN · distrito costeiro (acesso por portal na Associação) -----------------
+const THIS_CITY2=(()=>{
+ const W=3200,H=2200,rnd=seeded(4242),pick=a=>a[Math.floor(rnd()*a.length)];
+ const buildings=[],solids=[],lamps=[],palms=[],boats=[],stalls=[];
+ const PALETTE=['#3a6a8a','#8a5a3a','#4a7a5a','#6a4a7a','#a8763a','#2a5a6a','#7a3a4a'];
+ const B=(x,y,w,h,col,name)=>{buildings.push({x,y,w,h,color:col,name,roof:Math.min(40,Math.round(h*.3))});solids.push({x,y,w,h:h-6})};
+ // quarteirões
+ for(let row=0;row<3;row++)for(let col=0;col<4;col++){const x=140+col*760,y=180+row*520,w=520,h=380;
+  for(let i=0;i<2;i++){const bw=200+rnd()*180,bh=h-80;B(x+20+i*(bw+30),y+20,bw,bh,pick(PALETTE),pick(NAMES.shop))}
+  lamps.push({x:x+w/2,y:y-10});palms.push({x:x+40,y:y+h+30,s:.9});palms.push({x:x+w-40,y:y+h+40,s:.8})}
+ // orla: praia e mar
+ for(let i=0;i<26;i++)palms.push({x:120+rnd()*(W-240),y:1760+rnd()*120,s:.9+rnd()*.5});
+ for(let i=0;i<7;i++)boats.push({x:300+rnd()*(W-600),y:1980+rnd()*120,a:rnd()*Math.PI});
+ for(let i=0;i<8;i++)stalls.push({x:180+i*360,y:1690,w:90,h:34,color:pick(['#c23a3a','#d8a020','#2a8a6a','#3a6ad8']),food:pick(['PEIXE','TTEOK','HOTTEOK','ESPETOS'])});
+ for(const s of stalls)solids.push({x:s.x,y:s.y,w:s.w,h:s.h});
+ const spawn={x:1600,y:1500};
+ const spawnAreas=[{x:1200,y:1200,w:800,h:300,name:'PRAÇA DE BUSAN'},{x:200,y:200,w:900,h:400,name:'QUARTEIRÃO NORTE'},{x:2200,y:200,w:800,h:400,name:'PORTO LESTE'},{x:200,y:900,w:800,h:400,name:'MERCADO OESTE'},{x:2200,y:900,w:800,h:400,name:'COLINA SUL'}];
+ const zones=[{x:0,y:0,w:W,h:1760,name:'BUSAN'},{x:0,y:1800,w:W,h:H-1800,name:'MAR DE BUSAN'}];
+ const grid=new Map(),cell=256;for(const s of solids)for(let gx=Math.floor(s.x/cell);gx<=Math.floor((s.x+s.w)/cell);gx++)for(let gy=Math.floor(s.y/cell);gy<=Math.floor((s.y+s.h)/cell);gy++){const k=gx*1000+gy;if(!grid.has(k))grid.set(k,[]);grid.get(k).push(s)}
+ return {w:W,h:H,buildings,lamps,palms,boats,stalls,spawn,spawnAreas,zones,solids,grid,cell,portal:{x:1600,y:1420}};
+})();
+function makeSecondCity(){const C=THIS_CITY2;
+ const world={kind:'city2',rank:'E',theme:null,w:C.w,h:C.h,solids:C.solids,grid:C.grid,cell:C.cell,npcs:null,traffic:null,spawnAreas:C.spawnAreas,portal:C.portal,
+  blocked(x,y,rad=12){const g=this.grid,cs=C.cell;if(g){for(let gx=Math.floor((x-rad)/cs);gx<=Math.floor((x+rad)/cs);gx++)for(let gy=Math.floor((y-rad)/cs);gy<=Math.floor((y+rad)/cs);gy++){const l=g.get(gx*1000+gy);if(l)for(const s of l)if(x+rad>s.x&&x-rad<s.x+s.w&&y+rad*.6>s.y&&y-rad*.6<s.y+s.h)return true}}return y>1900},
+  terrainAt(){return null},update(){},cityTop(){},visible(v,x,y,w,h,m=60){return x+w>v.x-m&&x<v.x+v.w+m&&y+h>v.y-m&&y<v.y+v.h+m},
+  draw(c,t,v){const x0=v.x-40,y0=v.y-40,w=v.w+80,h=v.h+80;
+   // grama/pedra
+   c.fillStyle='#2c4438';c.fillRect(x0,y0,w,h);c.fillStyle='#3a5648';
+   for(let i=0;i<300;i++){const px=(i*173)%(C.w),py=(i*97)%(1760);c.fillRect(px,py,8,3)}
+   // praia e mar
+   c.fillStyle='#c8a878';c.fillRect(x0,1760,w,140);c.fillStyle='#e0c090';c.fillRect(x0,1760,w,20);
+   const g=c.createLinearGradient(0,1900,0,C.h);g.addColorStop(0,'#0e4a68');g.addColorStop(1,'#06283c');c.fillStyle=g;c.fillRect(x0,1900,w,C.h-1900);
+   c.save();c.globalAlpha=.3;c.strokeStyle='#9fd8e8';for(let x=x0-x0%140;x<x0+w;x+=140){c.beginPath();c.ellipse(x+Math.sin(t+x)*10,1950+Math.sin(t*.7+x)*8,60,8,0,0,7);c.stroke()}c.restore();
+   for(const b of C.boats){c.save();c.translate(b.x,b.y);c.rotate(b.a+Math.sin(t*.5+b.x)*.1);c.fillStyle='#5a3a22';c.fillRect(-22,-6,44,12);c.fillStyle='#e8e0d0';c.fillRect(-4,-26,3,22);c.beginPath();c.moveTo(0,-26);c.lineTo(16,-8);c.lineTo(0,-8);c.fill();c.restore()}
+   // ruas
+   c.fillStyle='#232a2e';for(let x=0;x<C.w;x+=760)c.fillRect(x,0,120,C.h);for(let y=150;y<1760;y+=520)c.fillRect(0,y,C.w,110);
+   c.fillStyle='#3a4448';for(let x=0;x<C.w;x+=760)c.fillRect(x+10,0,100,C.h);for(let y=150;y<1760;y+=520)c.fillRect(0,y+10,C.w,90);
+   // praça central
+   c.fillStyle='#3f4a4e';c.beginPath();c.ellipse(1600,1400,220,120,0,0,7);c.fill();c.fillStyle='#5a666a';c.beginPath();c.ellipse(1600,1400,180,92,0,0,7);c.fill();
+   c.fillStyle='#1d4a5a';c.beginPath();c.ellipse(1600,1400,70,40,0,0,7);c.fill();c.fillStyle='#9fe8f8';for(let i=0;i<8;i++){const a=i/8*7+t;c.globalAlpha=.4+.3*Math.sin(t*3+i);c.fillRect(1600+Math.cos(a)*40,1400+Math.sin(a)*22,3,3)}c.globalAlpha=1;
+   c.fillStyle='#d8e4e8';c.font='bold 12px monospace';c.textAlign='center';c.fillText('PRAÇA DE BUSAN',1600,1290);c.textAlign='left';
+   // prédios
+   for(const b of C.buildings){if(!world.visible(v,b.x,b.y,b.w,b.h))continue;const col=b.color,dark=shadeHex(col,-.35),light=shadeHex(col,.18);c.fillStyle=shadeHex(col,-.5);c.fillRect(b.x,b.y,b.w,b.roof);c.fillStyle=col;c.fillRect(b.x,b.y+b.roof,b.w,b.h-b.roof);
+    for(let wy=b.y+b.roof+10;wy<b.y+b.h-40;wy+=26)for(let wx=b.x+10;wx<b.x+b.w-20;wx+=24){c.fillStyle='';c.fillStyle=((wx+wy)%3===0)?'#ffd98a':'#1a2836';c.fillRect(wx,wy,12,14)}
+    c.fillStyle='#0b1218';c.fillRect(b.x+b.w/2-24,b.y+b.h-34,48,30);c.fillStyle='#bfe6ff';c.font='bold 10px monospace';c.textAlign='center';c.fillText(b.name,b.x+b.w/2,b.y+b.h-40);c.textAlign='left'}
+   for(const p of C.palms){c.fillStyle='#3a2a1e';c.fillRect(p.x-3*p.s,p.y-30*p.s,6*p.s,34*p.s);c.fillStyle='#2c5236';for(let i=0;i<5;i++){const a=-Math.PI/2+(i-2)*.5;c.beginPath();c.ellipse(p.x+Math.cos(a)*14*p.s,p.y-30*p.s+Math.sin(a)*8*p.s,14*p.s,5*p.s,a,0,7);c.fill()}}
+   for(const s of C.stalls){c.fillStyle='#4a3020';c.fillRect(s.x,s.y+10,s.w,s.h-10);for(let i=0;i<4;i++){c.fillStyle=i%2?'#f2f0e6':s.color;c.fillRect(s.x-4+i*12,s.y-8,12,14)}c.fillStyle='#14181b';c.font='bold 8px monospace';c.textAlign='center';c.fillText(s.food,s.x+s.w/2,s.y-13);c.textAlign='left'}
+   // portal de volta a Seoul
+   const P=C.portal;c.save();c.translate(P.x,P.y);const pg=c.createRadialGradient(0,0,4,0,0,60);pg.addColorStop(0,'#ffffff');pg.addColorStop(.3,'#3bcfff');pg.addColorStop(1,'#07101b');c.fillStyle=pg;c.beginPath();c.ellipse(0,0,42,60,0,0,7);c.fill();c.shadowBlur=20;c.shadowColor='#3bcfff';c.strokeStyle='#3bcfff';c.lineWidth=4;c.beginPath();c.ellipse(0,0,44,62,0,0,7);c.stroke();c.shadowBlur=0;c.restore();
+   c.fillStyle='#d8e4e8';c.font='bold 10px monospace';c.textAlign='center';c.fillText('PORTAL · SEOUL',P.x,P.y-90);c.textAlign='left';
+   // spawn marker
+   c.strokeStyle='#ffffff44';c.strokeRect(C.spawn.x-20,C.spawn.y-20,40,40);
+  }};
+ return world}
 const weapons=[{name:'Adaga de Ferro',damage:5,price:0},{name:'Presa de Kasaka',damage:18,price:300},{name:'Adaga do Assassino',damage:35,price:700},{name:'Adaga do Rei Demônio',damage:65,price:1500}];
-class GameEngine{constructor(){this.sprites=new ProceduralSprites();const portrait=$('#portraitCanvas').getContext('2d');portrait.imageSmoothingEnabled=false;portrait.drawImage(this.sprites.playerFrames['2:idle'],14,4,36,45,0,0,80,100);this.sound=new SoundFX();this.particles=new ParticleSystem();this.input=new InputHandler();this.gates=new GateSystem();this.projectiles=[];this.hazards=[];this.impacts=[];this.shakeT=0;this.shakeMag=0;this.started=false;this.time=0;this.last=0;this.hudClock=0;this.camera={x:0,y:0};this.renderScale=1;Mobile.init();this.resize();window.addEventListener('resize',()=>this.resize());HudManager.init();requestAnimationFrame(t=>this.loop(t))}
+class GameEngine{constructor(){this.sprites=new ProceduralSprites();const portrait=$('#portraitCanvas').getContext('2d');portrait.imageSmoothingEnabled=false;portrait.drawImage(this.sprites.playerFrames['2:idle'],14,4,36,45,0,0,80,100);this.sound=new SoundFX();this.music=new MusicSystem();this.particles=new ParticleSystem();this.input=new InputHandler();this.gates=new GateSystem();this.projectiles=[];this.hazards=[];this.impacts=[];this.shakeT=0;this.shakeMag=0;this.started=false;this.time=0;this.last=0;this.hudClock=0;this.camera={x:0,y:0};this.renderScale=1;
+ // expansion state
+ this.hitStop=0;this.comboSeq=0;this.comboSeqT=0;this.armyOrder='ATTACK';this.exchangeCd=0;this.daily=null;this.bestiary={};this.hunter={points:0,rank:'E',evalReady:false};this.contracts=[];this.story={};this.tutorialDone=0;this.tutorial={step:0};this.tutMove=0;this.tutAttack=0;this.tutDash=0;this.tutSummon=0;this.tutT=0;this.dayTime=.32;this.weather=0;this.redTimer=0;this.redGateActive=false;this.roomEvent=null;this.eventRoom=-1;this.cutscene=null;this.qte=null;this.ally=null;this.companion=null;this.cityIndex=0;this.newCityUnlocked=false;this.secretRevealed=false;this.penalty=null;this.fps=0;this._fpsAcc=0;this._fpsN=0;this.fpsVal=0;this._darkOff=false;this._lastRoomId=3;
+ Mobile.init();this.resize();window.addEventListener('resize',()=>this.resize());HudManager.init();requestAnimationFrame(t=>this.loop(t))}
 resize(){const W=innerWidth,H=innerHeight,base=Mobile.scale(W,H);let s=base;this.viewLayout=null;
  if(this.world&&this.world.kind==='dungeon'){const L=this.viewLayout=this.roomLayout(W,H,base);s=L.s}
  this.renderScale=s;canvas.width=Math.round(W/s);canvas.height=Math.round(H/s);ctx.imageSmoothingEnabled=false;this._layoutSig=this.hudSignature()}
@@ -1888,10 +2157,17 @@ drawWorldEdges(c,v){const w=this.world,col=this.backdropColor(),F=90;if(v.x>F&&v
  c.restore()}
 // Re-measure the HUD a few times per second; resize only when the layout really changed.
 checkViewLayout(dt){if(this.world.kind!=='dungeon')return;this._layoutT=(this._layoutT||0)-dt;if(this._layoutT>0)return;this._layoutT=.3;const sig=this.hudSignature();if(sig!==this._layoutSig)this.resize()}
-start(saved){this.player=new Player(saved?.player);this.animation=new PlayerAnimation(this.sprites);if(this.player.hp<=0){this.player.hp=this.player.maxhp;this.player.mp=this.player.maxmp}this.army=saved?.army||[];this.quest=saved?.quest||0;this.questDate=new Date().toLocaleDateString('en-CA');if(saved?.questDate!==this.questDate)this.quest=0;this.questDone=saved?.questDate===this.questDate&&(saved?.questDone||false);this.unlocked=saved?.unlocked||0;this.world=new WorldMap();this.gates=new GateSystem();this.projectiles=[];this.hazards=[];this.impacts=[];this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.pendingStrikes=[];this.panel=null;this.started=true;this.bossDefeated=false;this.chest=false;this.redGate=false;$('#start').classList.add('hidden');$('#hud').classList.remove('hidden');this.message('BEM-VINDO, JOGADOR');this.sound.play('alert');Mobile.apply();this.updateHUD()}
+start(saved){this.player=new Player(saved?.player);this.animation=new PlayerAnimation(this.sprites);if(this.player.hp<=0){this.player.hp=this.player.maxhp;this.player.mp=this.player.maxmp}this.army=saved?.army||[];this.quest=saved?.quest||0;this.questDate=new Date().toLocaleDateString('en-CA');if(saved?.questDate!==this.questDate)this.quest=0;this.questDone=saved?.questDate===this.questDate&&(saved?.questDone||false);this.unlocked=saved?.unlocked||0;
+ const today=new Date().toLocaleDateString('en-CA');this.daily=saved?.daily&&saved.daily.date===today?saved.daily:{date:today,kills:0,dashes:0,distance:0,done:false,penalty:false};this.bestiary=saved?.bestiary||{};this.hunter=saved?.hunter||{points:0,rank:'E',evalReady:false};this.contracts=saved?.contracts||[];this.story=saved?.story||{};this.tutorialDone=saved?.tutorial||0;this.dayTime=saved?.dayTime??.32;this.cityIndex=saved?.cityIndex||0;this.newCityUnlocked=this.cityIndex>0;
+ this.world=new WorldMap();this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts();this.projectiles=[];this.hazards=[];this.impacts=[];this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.pendingStrikes=[];this.panel=null;this.started=true;this.bossDefeated=false;this.chest=false;this.redGate=false;this.redGateActive=false;this.redTimer=0;this.weather=0;this.roomEvent=null;this.eventRoom=-1;this.cutscene=null;this.qte=null;this.ally=null;this.companion=null;this.hitStop=0;this.comboSeq=0;this.comboSeqT=0;this.exchangeCd=0;this.armyOrder='ATTACK';this.penalty=null;
+ $('#start').classList.add('hidden');$('#hud').classList.remove('hidden');this.message(this.tutorialDone?'BEM-VINDO DE VOLTA, JOGADOR':'BEM-VINDO, JOGADOR');this.sound.play('alert');this.music.enabled=Settings.d.music;this.music.start();this.sound.enabled=Settings.d.sfx;this.fps=Settings.d.fps?1:0;Mobile.apply();this.updateHUD()}
 message(text){$('#notice').textContent=text;clearTimeout(this.noticeTimer);this.noticeTimer=setTimeout(()=>$('#notice').textContent='',3200)}
 shake(mag,time=.25){this.shakeMag=Math.max(this.shakeMag,mag);this.shakeT=Math.max(this.shakeT,time)}
-key(k){if(!this.started)return;if(k==='h'){HudManager.toggleClean();return}if(this.panel){if(this.panel==='dead')return;if(['escape','tab','c','i','v','b','n'].includes(k))UIManager.close();return}if(k==='c'||k==='tab')UIManager.open('status');else if(k==='i')UIManager.open('inventory');else if(k==='v')UIManager.open('army');else if(k==='b')UIManager.open('shop');else if(k==='n')UIManager.open('bestiary');else if(k==='escape')UIManager.open('pause');else if(k==='e')this.interact();else if(k==='r')this.toggleArmy();else if(k==='shift')this.dash();else if(k===' ')this.attack();else if(['1','2','3'].includes(k))this.skill(+k);else if(k==='q')this.potion('hp');else if(k==='f')this.potion('mp')}
+key(k){if(!this.started)return;if(k==='h'){HudManager.toggleClean();return}
+ if(this.cutscene){if(k===' '||k==='enter')this.advanceCutscene();return}
+ if(this.qte){if(k===' ')this.qte.press();return}
+ if(this.panel){if(this.panel==='dead')return;if(['escape','tab','c','i','v','b','n','t','p'].includes(k))UIManager.close();return}
+ if(k==='c'||k==='tab')UIManager.open('status');else if(k==='i')UIManager.open('inventory');else if(k==='v')UIManager.open('army');else if(k==='b')UIManager.open('shop');else if(k==='n')UIManager.open('bestiary');else if(k==='t')UIManager.open('talents');else if(k==='p')UIManager.open('contracts');else if(k==='escape')UIManager.open('pause');else if(k==='e')this.interact();else if(k==='r')this.toggleArmy();else if(k==='g'){if(this.story.jinho===2){this.spawnAlly(PEOPLE.hunters[2],'YOO JIN-HO')}else this.message('YOO JIN-HO AINDA NÃO SE JUNTOU A VOCÊ')}else if(k==='shift')this.dash();else if(k===' ')this.attack();else if(['1','2','3'].includes(k))this.skill(+k);else if(k==='q')this.potion('hp');else if(k==='f')this.potion('mp')}
 // Damage / status from the terrain under the hunter, plus a one-time warning per hazard type.
 terrainEffects(p,dt){const z=this.world.terrainAt?this.world.terrainAt(p.x,p.y):null;if(!z){p.burnT=0;return}
  if(this.hazardSeen&&!this.hazardSeen.has(z.name)){this.hazardSeen.add(z.name);this.message(`⚠ ${z.name}: ${z.kind==='burn'?'causa dano contínuo':z.kind==='poison'?'envenena':z.kind==='ice'?'escorregadio · o movimento desliza':'reduz a velocidade'}`)}
@@ -1899,7 +2175,8 @@ terrainEffects(p,dt){const z=this.world.terrainAt?this.world.terrainAt(p.x,p.y):
  if(p.burnT<=0){p.burnT=burn?.5:.7;const dmg=Math.max(1,Math.round((burn?3+p.level*.6:2+p.level*.35)*(1-Math.min(.6,p.stats.VIT*.008))));p.hp-=dmg;p.hurtTime=.12;
   this.floats.push({x:p.x+rand(-8,8),y:p.y-46,text:'-'+dmg,life:.6,color:burn?'#ff9a4a':'#c6ff6a',size:13});this.particles.burst(p.x,p.y,burn?'#ff7a2a':z.color||'#8aff4a',6,burn?{kind:'ember',speed:60,lift:50}:{speed:40,lift:30});
   if(!burn)p.slow=Math.max(p.slow||0,.6);if(p.hp<=0){p.hp=0;UIManager.open('dead')}}}
-enter(rank,red=false,themeId=null){UIManager.close();this.world=DungeonGenerator.create(rank,themeId);this.hazardSeen=new Set();this._lastRoom=null;this._camSnap=true;this.resize();this.animation=new PlayerAnimation(this.sprites);this.player.x=300;this.player.y=600;this.bossDefeated=false;this.chest=false;this.redGate=!!red;this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.corpses=[];this.soldiers=[];this.summoned=false;let idx=Math.max(0,RANKS.indexOf(rank)),th=this.world.theme,types=th&&th.mon?th.mon.filter(t=>MONSTER_TYPES[t]):GATE_MONSTERS(idx);if(!types.length)types=GATE_MONSTERS(idx);this.enemies=[];
+enter(rank,red=false,themeId=null){UIManager.close();this.world=DungeonGenerator.create(rank,themeId);this.hazardSeen=new Set();this._lastRoom=null;this._camSnap=true;this.resize();this.animation=new PlayerAnimation(this.sprites);this.player.x=300;this.player.y=600;this.bossDefeated=false;this.chest=false;this.redGate=!!red;this.redGateActive=!!red;this.redTimer=red?90:0;this.weather=0;this.classChangeReady=false;this.pendingStrikes=[];
+ const pg=this.pendingGate;this.pendingGate=null;this.penalty=pg&&pg.penalty?{wave:0,need:3}:null;this.classChange=pg&&pg.classChange?true:false;this.weather=0;this.roomEvent=null;this.eventRoom=-1;this.secretRevealed=false;this._secretCheck=0;this.buildBreakables();this.projectiles=[];this.hazards=[];this.impacts=[];this.corpses=[];this.soldiers=[];this.summoned=false;let idx=Math.max(0,RANKS.indexOf(rank)),th=this.world.theme,types=th&&th.mon?th.mon.filter(t=>MONSTER_TYPES[t]):GATE_MONSTERS(idx);if(!types.length)types=GATE_MONSTERS(idx);this.enemies=[];
  // Every monster is placed only on a validated walkable spot (inside its room, clear of walls and of
  // the other monsters); if random tries fail, a ring search from the room centre takes over.
  const bdef=BOSS_TYPES[rank]||BOSS_TYPES.E,bossRoom=this.world.rooms[5],bsp=this.findFreeSpot(bossRoom.cx,bossRoom.cy,bdef.radius,0,200)||{x:bossRoom.cx,y:bossRoom.cy};
@@ -1969,52 +2246,132 @@ shadowStrike(s,A){const a=A.a,dmg=s.damageOf(a),col='#b46bff';s.swing=.25;A.phas
 }
 spawnSoldiers(){const p=this.player,taken=[];return this.army.map((d,i)=>{const r=Math.min(26,shadowDef(normalizeShadow(d,p.level)).radius||16);
  const sp=this.findFreeSpot(p.x,p.y,r,40,260,{los:true,avoid:[p,...taken],sep:r+14,angle:(p.angle||0)+Math.PI})||this.findFreeSpot(p.x,p.y,12,0,320,{avoid:taken,sep:20})||{x:p.x,y:p.y};taken.push(sp);return new ShadowSoldier(d,i,sp)})}
-returnHub(){this.world=new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.player.x=HUB.spawn.x;this.player.y=HUB.spawn.y;this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;UIManager.close();this.resize();this._camSnap=true;SaveSystem.save(this);this.message('ÁREA SEGURA · ASSOCIAÇÃO DOS CAÇADORES')}
-interact(){let p=this.player;if(this.world.kind==='hub'){const gate=this.gates.nearest(p);if(gate){this.selectedGate=gate;UIManager.open('gate')}else if(dist(p,HUB.merchant)<100)UIManager.open('shop');else if(dist(p,HUB.healer)<100){p.hp=p.maxhp;p.mp=p.maxmp;this.message('HP E MP RESTAURADOS');this.sound.play('alert');this.particles.burst(p.x,p.y,'#5affb0',24,{speed:90,lift:60})}}
- else{let corpse=this.corpses.find(c=>dist(c,p)<75);if(corpse){corpse.tries++;let chance=Math.min(.9,.35+p.stats.INT*.02+(p.level-corpse.level)*.03);if(this.army.length>=armyCap(p)){this.message(`CAPACIDADE DE SOMBRAS ATINGIDA · ${this.army.length}/${armyCap(p)}`);return}this.animation.play('summon',p,.5);this.animation.effect('summon',corpse);this.particles.burst(corpse.x,corpse.y,'#bd59ff',30);this.sound.play('shadow');if(Math.random()<chance){const d=normalizeShadow({name:corpse.name,type:corpse.type,boss:!!corpse.boss,art:corpse.art,level:corpse.level,rank:corpse.boss?'Comandante':'Normal',kills:0,xp:0},p.level);this.army.push(d);
-    // Raised on the spot when the army is out: the new shadow joins right where the body lay.
-    if(this.summoned){const sp=this.findFreeSpot(corpse.x,corpse.y,Math.min(26,shadowDef(d).radius),0,160,{avoid:this.soldiers,sep:24})||{x:p.x,y:p.y};this.soldiers.push(new ShadowSoldier(d,this.soldiers.length,sp))}this.corpses.splice(this.corpses.indexOf(corpse),1);this.message('EXTRAÇÃO DE SOMBRA BEM-SUCEDIDA!');SaveSystem.save(this)}else{this.message(`EXTRAÇÃO FALHOU · ${3-corpse.tries} TENTATIVAS`);if(corpse.tries>=3)this.corpses.splice(this.corpses.indexOf(corpse),1)}return}
-  if(this.bossDefeated&&!this.chest&&dist(p,{x:1500,y:600})<90){this.chest=true;p.gold+=(200+this.world.rank.charCodeAt(0))*(this.redGate?2:1);this.unlocked=Math.min(5,Math.max(this.unlocked,RANKS.indexOf(this.world.rank)+1));this.message('BAÚ COLETADO! PORTAL DE SAÍDA ABERTO');SaveSystem.save(this)}else if(this.chest&&dist(p,{x:1560,y:650})<110)this.returnHub()}}
+returnHub(){this.world=this.cityIndex===1?makeSecondCity():new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];const sp=this.cityIndex===1?THIS_CITY2.spawn:HUB.spawn;this.player.x=sp.x;this.player.y=sp.y;this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;this.redGateActive=false;this.penalty=null;this.classChange=false;this.ally=null;this.roomEvent=null;this.eventRoom=-1;this.weather=0;this.armyOrder='ATTACK';
+ if(this.cityIndex===1){this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts()}
+ UIManager.close();this.resize();this._camSnap=true;SaveSystem.save(this);this.message(this.cityIndex===1?'ÁREA SEGURA · BUSAN':'ÁREA SEGURA · ASSOCIAÇÃO DOS CAÇADORES')}
+interact(){let p=this.player;
+ if(this.cutscene){this.advanceCutscene();return}
+ if(this.world.kind==='hub'||this.world.kind==='city2'){
+  if(this.world.kind==='city2'&&this.world.portal&&dist(p,this.world.portal)<90){this.travelToCity(0);return}
+  const gate=this.gates.nearest(p);if(gate){this.selectedGate=gate;UIManager.open('gate');return}
+  if(dist(p,HUB.merchant)<100){UIManager.open('shop');return}
+  if(dist(p,HUB.healer)<100){p.hp=p.maxhp;p.mp=p.maxmp;this.message('HP E MP RESTAURADOS');this.sound.play('alert');this.particles.burst(p.x,p.y,'#5affb0',24,{speed:90,lift:60});return}
+  if(this.world.kind==='hub'&&dist(p,HUB.contractBoard)<90){this.openContracts();return}
+  if(this.world.kind==='hub'&&dist(p,HUB.jinho)<90){this.talkJinho();return}
+  if(this.world.kind==='hub'&&dist(p,HUB.portal2)<90){this.travelToCity(1);return}
+  const hi=this.gates.list.find(g=>dist(g,p)<150&&RANKS.indexOf(g.rank)>=3);if(hi&&Math.random()<.5){this.talkCha();return}
+  return}
+ // dentro da dungeon
+ let corpse=this.corpses.find(c=>dist(c,p)<75);if(corpse){this.extractShadow(corpse);return}
+ // eventos aleatórios de sala
+ if(this.roomEvent){const ev=this.roomEvent,r=this.world.rooms[ev.room];if(r&&Math.hypot(p.x-r.cx,p.y-r.cy)<120){
+  if(ev.type==='trap'){this.roomEvent=null;this.message('ARMADILHA ACIONADA!');this.shake(6,.3);this.damagePlayer(14);this.spawnCityMonsters(r.cx,r.cy,2,1+RANKS.indexOf(this.world.rank)*4);return}
+  if(ev.type==='hunter'&&!ev.taken){ev.taken=true;this.message('CAÇADOR FERIDO SE JUNTOU A VOCÊ');this.spawnAlly(PEOPLE.hunters[4],'CAÇADOR FERIDO');this.roomEvent=null;return}
+  if(ev.type==='challenge'){this.message('DESAFIO EM ANDAMENTO · ABATA '+ev.need);return}}
+ if(this.bossDefeated&&!this.chest&&dist(p,{x:1500,y:600})<90){this.chest=true;p.gold+=(200+this.world.rank.charCodeAt(0))*(this.redGate?2:1);this.unlocked=Math.min(5,Math.max(this.unlocked,RANKS.indexOf(this.world.rank)+1));this.message('BAÚ COLETADO! PORTAL DE SAÍDA ABERTO');
+   if(this.classChangeReady){p.playerClass=1;this.classChange=false;this.classChangeReady=false;this.redGateActive=false;this.startCutscene([{who:'SISTEMA',text:'MUDANÇA DE CLASSE · MONARCA DAS SOMBRAS',color:'#c879ff',dur:2.6},{who:'SISTEMA',text:'HP +15% · novas sombras obedecem · o Sistema reconhece você',color:'#7fe8ff',dur:2.8}],{auto:2.6,zoom:1.9,focus:()=>p,onDone:()=>this.message('CLASSE DESBLOQUEADA')})}
+   SaveSystem.save(this)}else if(this.chest&&dist(p,{x:1560,y:650})<110)this.returnHub()}}
+// Cerimônia do "Levante-se": 3 tentativas, chance por nível e INT; chefes ganham câmera lenta + LEVANTE-SE.
+extractShadow(corpse){const p=this.player;corpse.tries=(corpse.tries||0)+1;const isBoss=!!corpse.boss;
+ const chance=Math.min(.9,.35+p.stats.INT*.02+(p.level-corpse.level)*.03)*(isBoss?.7:1)*(this.isNight()?1.1:1);
+ if(this.army.length>=this.shadowCap()){this.message(`CAPACIDADE DE SOMBRAS ATINGIDA · ${this.army.length}/${this.shadowCap()}`);return}
+ this.animation.play('summon',p,.5);this.animation.effect('summon',corpse);this.particles.burst(corpse.x,corpse.y,'#bd59ff',30);this.sound.play('shadow',corpse.x,corpse.y);
+ if(Math.random()<chance){
+  const u=isBoss?UNIQUE_SHADOWS[corpse.type]:null;
+  const d=normalizeShadow({name:u?u.name:corpse.name,type:corpse.type,boss:isBoss,art:corpse.art,level:corpse.level,rank:isBoss?'Comandante':'Normal',kills:0,xp:0,unique:u?u.key:null},p.level);
+  if(u){d.rank=shadowRankTitle(0);d.unique=u.key}
+  this.army.push(d);
+  if(this.summoned){const sp=this.findFreeSpot(corpse.x,corpse.y,Math.min(26,shadowDef(d).radius),0,160,{avoid:this.soldiers,sep:24})||{x:p.x,y:p.y};this.soldiers.push(new ShadowSoldier(d,this.soldiers.length,sp))}
+  this.corpses.splice(this.corpses.indexOf(corpse),1);
+  if(isBoss){this.startCutscene([{who:'SISTEMA',text:'LEVANTE-SE',color:'#c879ff',dur:2.2},{who:'SISTEMA',text:`${d.name} · ${u?u.title:'SOMBRA'} EXTRAÍDA COM SUCESSO`,color:'#7fe8ff',dur:2.4}],{auto:2.2,zoom:1.8,focus:()=>corpse})}
+  else this.message('EXTRAÇÃO DE SOMBRA BEM-SUCEDIDA!');
+  SaveSystem.save(this)}else{this.message(`EXTRAÇÃO FALHOU · ${3-corpse.tries} TENTATIVAS`);if(corpse.tries>=3)this.corpses.splice(this.corpses.indexOf(corpse),1)}}
+// ---- Interações da cidade: contratos, história, nova cidade -----------------------------------
+openContracts(){UIManager.open('contracts')}
+talkJinho(){const st=this.story;
+ if(!st.jinho){st.jinho=1;this.startCutscene([{who:'YOO JIN-HO',text:'Você é o Player? Eu ouvi falar de você. Me deixe entrar na próxima dungeon com você.',color:'#ffd27a',dur:3},{who:'SISTEMA',text:'Missão: entre em uma dungeon com Yoo Jin-ho. Recompensa: 200 G e 2 pontos.',color:'#7fe8ff',dur:3}],{auto:3,zoom:1.6,focus:()=>({x:HUB.jinho.x,y:HUB.jinho.y}),onDone:()=>{st.jinho=2;this.message('JIN-HO DISPONÍVEL · INVOQUE-O NA DUNGEON COM [G]')}});return}
+ if(st.jinho===2){this.startCutscene([{who:'YOO JIN-HO',text:'Estou pronto quando você estiver. Vamos nessa!',color:'#ffd27a',dur:2.4}],{auto:2.4,zoom:1.6,focus:()=>({x:HUB.jinho.x,y:HUB.jinho.y})});return}
+ this.startCutscene([{who:'YOO JIN-HO',text:'Obrigado por hoje. Você é mais forte do que todos dizem.',color:'#ffd27a',dur:2.6}],{auto:2.6,zoom:1.6,focus:()=>({x:HUB.jinho.x,y:HUB.jinho.y})})}
+talkCha(){const st=this.story;st.cha=(st.cha||0)+1;
+ this.startCutscene([{who:'CHA HAE-IN',text:'Você é Sung Jin-Woo. Eu sinto... um poder diferente em você. Cuidado com gates de rank alto.',color:'#8fd8ff',dur:3.2},{who:'SISTEMA',text:'Cha Hae-in concedeu sua bênção: +10% de mana por 60 segundos.',color:'#7fe8ff',dur:2.6}],{auto:3,zoom:1.7,focus:()=>this.player,onDone:()=>{this.player.mp=this.player.maxmp;this.message('BÊNÇÃO DE CHA HAE-IN')}})}
+// ---- Gate vermelho: sem saída até o chefe; clima piora com o tempo -----------------------------
+enterRed(rank,themeId){this.enter(rank,true,themeId);this.redGateActive=true;this.redTimer=90;this.weather=0;this.message('GATE VERMELHO · SEM SAÍDA ATÉ O CHEFE')}
 // MP/s currently drained by the summoned army (only shadows standing on the field).
 armyDrain(){return this.summoned?armyUpkeep(this.player,this.soldiers.filter(s=>s.state!=='REGENERATE').map(s=>s.data)):0}
 updateArmyMana(dt){const p=this.player;this.armyT=(this.armyT||0)+dt;p.mp-=this.armyDrain()*dt;
  if(p.mp<=0){p.mp=0;for(const s of this.soldiers)this.particles.burst(s.x,s.y-12,'#3b1466',12,{speed:70});this.summoned=false;this.soldiers=[];this.message(`MANA ESGOTADA · SOMBRAS RETORNARAM APÓS ${fmtTime(this.armyT)}`);this.sound.play('shadow')}}
 toggleArmy(){const p=this.player;let cost=0;
- if(!this.summoned){if(!this.army.length){this.message('NENHUMA SOMBRA NO EXÉRCITO · EXTRAIA COM [E]');return}
+ if(!this.summoned){if(!this.army.length){this.tutSummon++;this.message('NENHUMA SOMBRA NO EXÉRCITO · EXTRAIA COM [E]');return}
   this.army.forEach(d=>normalizeShadow(d,p.level));cost=armySummonCost(p,this.army);
   if(p.mp<cost){this.message(`MANA INSUFICIENTE · INVOCAR CUSTA ${cost} MP`);this.floats.push({x:p.x,y:p.y-58,text:`${cost} MP`,life:.9,color:'#ff8fa0',size:13});return}
   p.mp-=cost;this.armyT=0;this.floats.push({x:p.x,y:p.y-62,text:`−${cost} MP`,life:1.1,color:'#c99bff',size:15})}
- this.summoned=!this.summoned;this.soldiers=this.summoned?this.spawnSoldiers():[];for(const s of this.soldiers)this.particles.burst(s.x,s.y-12,'#a855f7',14,{speed:90,lift:40});this.message(this.summoned?`EXÉRCITO INVOCADO · −${cost} MP · −${fmtRate(this.armyDrain())} MP/s`:'SOMBRAS GUARDADAS');this.animation.play('summon',this.player,.45);this.animation.effect('summon',this.player);this.sound.play('shadow')}
+ this.summoned=!this.summoned;this.soldiers=this.summoned?this.spawnSoldiers():[];if(this.summoned)this.tutSummon++;for(const s of this.soldiers)this.particles.burst(s.x,s.y-12,'#a855f7',14,{speed:90,lift:40});this.message(this.summoned?`EXÉRCITO INVOCADO · −${cost} MP · −${fmtRate(this.armyDrain())} MP/s · ORDEM ${this.armyOrder}`:'SOMBRAS GUARDADAS');this.animation.play('summon',this.player,.45);this.animation.effect('summon',this.player);this.sound.play('shadow')}
 // Dash: short invulnerability and an ambush bonus window (stealth). The hero stays fully opaque.
 // Touch auto-aim: nearest visible enemy (wider reach while the attack button is held).
 aimTarget(){const p=this.player;let best=null,bd=this.input.touchAttack?280:200;for(const e of this.enemies){if(!this.fogVisible(e))continue;const d=dist(e,p)-e.radius*.5;if(d<bd){bd=d;best=e}}return best}
-dash(){if(!this.started||this.panel||this.player.dashCd>0)return;let p=this.player;p.dashTime=.18;p.invuln=.3;p.stealth=1.5;p.dashCd=Math.max(.5,1.3-p.stats.AGI*.01);let dx=(this.input.keys.d||this.input.keys.arrowright?1:0)-(this.input.keys.a||this.input.keys.arrowleft?1:0),dy=(this.input.keys.s||this.input.keys.arrowdown?1:0)-(this.input.keys.w||this.input.keys.arrowup?1:0);let n=Math.hypot(dx,dy);const st=this.input.stick;if(!n&&st&&st.mag>.18){dx=st.x;dy=st.y;n=Math.hypot(dx,dy)}p.dashX=n?dx/n:Math.cos(p.angle);p.dashY=n?dy/n:Math.sin(p.angle);this.animation.play('dash',p,.18,Math.atan2(p.dashY,p.dashX));this.particles.ring(p.x,p.y+8,'#3fd6ff',50,.3,3);this.particles.burst(p.x,p.y-4,'#14062a',4,{kind:'smoke',speed:30,life:1,size:10});this.particles.burst(p.x,p.y-10,'#b06bff',8,{kind:'ember',speed:60,life:.8});this.sound.play('dash')}
+// Assistente de mira no toque: mirar no alvo mais próximo enquanto o ataque está pressionado;
+// soltar dispara o golpe. No PC, o mouse mira pelo ângulo do cursor.
+aimAssist(){if(!this.input.touchAttack||!this.input.stick||this.input.stick.mag<.18)return;const t=this.aimTarget();if(t){this.player.angle=Math.atan2(t.y-this.player.y,t.x-this.player.x);this.player.aimAssist=true}}
+drawAimAssist(){if(!this.input.touchAttack)return;const t=this.aimTarget();if(!t)return;const p=this.player;const sx=t.x-this.camera.x,sy=t.y-this.camera.y,W=canvas.width,H=canvas.height;ctx.save();ctx.strokeStyle='#3fd6ff';ctx.globalAlpha=.5;ctx.setLineDash([6,6]);ctx.beginPath();ctx.moveTo(p.x-this.camera.x,p.y-14-this.camera.y);ctx.lineTo(clamp(sx,20,W-20),clamp(sy,20,H-20));ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.arc(clamp(sx,20,W-20),clamp(sy,20,H-20),10,0,7);ctx.stroke();ctx.restore()}
+dash(){if(!this.started||this.panel||this.player.dashCd>0)return;let p=this.player;p.dashTime=.18;p.invuln=.3;p.stealth=1.5;p.dashCd=this.dashCdMax();this.tutDash++;if(this.daily)this.daily.dashes++;let dx=(this.input.keys.d||this.input.keys.arrowright?1:0)-(this.input.keys.a||this.input.keys.arrowleft?1:0),dy=(this.input.keys.s||this.input.keys.arrowdown?1:0)-(this.input.keys.w||this.input.keys.arrowup?1:0);let n=Math.hypot(dx,dy);const st=this.input.stick;if(!n&&st&&st.mag>.18){dx=st.x;dy=st.y;n=Math.hypot(dx,dy)}p.dashX=n?dx/n:Math.cos(p.angle);p.dashY=n?dy/n:Math.sin(p.angle);this.animation.play('dash',p,.18,Math.atan2(p.dashY,p.dashX));this.particles.ring(p.x,p.y+8,'#3fd6ff',50,.3,3);this.particles.burst(p.x,p.y-4,'#14062a',4,{kind:'smoke',speed:30,life:1,size:10});this.particles.burst(p.x,p.y-10,'#b06bff',8,{kind:'ember',speed:60,life:.8});this.sound.play('dash')}
 attack(mult=1,range=85,area=false,forceCrit=false,bypass=false,style='combo'){this.combatT=2.5;
  let p=this.player;if(!p||(!bypass&&p.cool>0)||this.panel)return;
  if(!bypass)p.cool=Math.max(.16,.36-p.stats.AGI*.005);
+ if(style==='combo'){this.tutAttack++}
  let variant=0;
  if(style==='combo'){p.combo=p.comboWindow>0?(p.combo%3)+1:1;p.comboWindow=.85;variant=p.combo;this.animation.play(`combo${variant}`,p,variant===3?.3:.23)}
  else if(style==='mutilation'){variant=bypass?++p.multiVisual:0;this.animation.play('mutilation',p,.16)}
  else if(style==='vital')this.animation.play('vital',p,.3);
  else if(style==='authority')this.animation.play('authority',p,.5);
- this.animation.effect(style,p,p.angle,variant);this.sound.play('slash');
+ this.animation.effect(style,p,p.angle,variant);this.sound.play('slash',p.x,p.y);
  const fx=p.x+Math.cos(p.angle)*50,fy=p.y-14+Math.sin(p.angle)*50;this.particles.burst(fx,fy,variant===3?'#b06bff':'#7ff0ff',variant===3?14:6,{angle:p.angle,spread:1.4,speed:220,life:.6});
- for(let e of [...this.enemies]){let d=dist(p,e),a=Math.atan2(e.y-p.y,e.x-p.x),diff=Math.atan2(Math.sin(a-p.angle),Math.cos(a-p.angle));if(d<range+e.radius*.6&&(area||Math.abs(diff)<1.15)){let crit=forceCrit||Math.random()<(5+p.stats.PER*1.2)/100;if(forceCrit)e.bleed=3;let damage=(10+p.stats.FOR*3.5+weapons[p.weapon].damage)*mult*(crit?1.75+p.stats.PER*.02:1)*(p.stealth>0?1.5:1)*(variant===3?1.25:1);this.hit(e,damage,crit,null,a);p.stealth=0}}
+ const dmgBase=p.atk*mult*this.talentDmgMult()*(p.stealth>0?1.5:1)*(variant===3?1.25:1);
+ for(let e of [...this.enemies]){let d=dist(p,e),a=Math.atan2(e.y-p.y,e.x-p.x),diff=Math.atan2(Math.sin(a-p.angle),Math.cos(a-p.angle));if(d<range+e.radius*.6&&(area||Math.abs(diff)<1.15)){let crit=forceCrit||Math.random()<this.critChance();if(forceCrit)e.bleed=3;let damage=dmgBase*(crit?1.75+p.stats.PER*.02:1)*(1+this.bestiaryBonus(e.type));this.hit(e,damage,crit,null,a);p.stealth=0}}
+ // golpes fortes também quebram pilares e revelam paredes rachadas
+ if(style!=='mutilation')this.hitBreakables(p.x,p.y,p.angle,range,area?Math.PI:1.15);
+ if(this._secretCheck===0&&this.world.secret)this._secretCheck=1;
+ if(this.world.secret&&this.player.stats.PER>=18)this.revealSecret();
 }
-skill(n){let p=this.player,cost=[0,15,25,35][n];if(p.mp<cost||p.cool>0){this.message('MANA INSUFICIENTE OU HABILIDADE EM RECARGA');return}p.mp-=cost;if(n===1){this.moveActor(p,Math.cos(p.angle)*55,Math.sin(p.angle)*55);this.attack(1.3,100,false,true,false,'vital')}if(n===2){p.multiVisual=0;this.attack(.7,110,false,false,false,'mutilation');p.cool=Math.max(p.cool,.42);for(let i=1;i<5;i++)this.pendingStrikes.push({delay:i*.09})}if(n===3){this.attack(1.8,160,true,false,false,'authority');for(let e of this.enemies)if(dist(e,p)<160+e.radius*.5){e.stun=1.5;if(e.state!=='chase'){e.state='chase';e.current=null}let a=Math.atan2(e.y-p.y,e.x-p.x);this.moveActor(e,Math.cos(a)*40,Math.sin(a)*40)}this.particles.burst(p.x,p.y,'#71dfff',30,{speed:260});this.particles.ring(p.x,p.y+10,'#b06bff',190,.55,6);this.particles.ring(p.x,p.y+10,'#3fd6ff',150,.45,3);this.shake(7,.32)}}
-hit(e,amount,crit,source=null,angle=null){e.hp-=amount;e.flash=.14;const a=angle??Math.atan2(e.y-this.player.y,e.x-this.player.x);
+skill(n){let p=this.player,cost=[0,15,25,35][n];if(p.mp<cost||p.cool>0){this.message('MANA INSUFICIENTE OU HABILIDADE EM RECARGA');return}p.mp-=cost;if(n===1){this.moveActor(p,Math.cos(p.angle)*55,Math.sin(p.angle)*55);this.attack(1.3,100,false,true,false,'vital')}if(n===2){p.multiVisual=0;this.attack(.7,110,false,false,false,'mutilation');p.cool=Math.max(p.cool,.42);for(let i=1;i<5;i++)this.pendingStrikes.push({delay:i*.09})}if(n===3){this.attack(1.8,160,true,false,false,'authority');for(let e of this.enemies)if(dist(e,p)<160+e.radius*.5){e.stun=1.5;if(e.state!=='chase'){e.state='chase';e.current=null}let a=Math.atan2(e.y-p.y,e.x-p.x);this.moveActor(e,Math.cos(a)*70,Math.sin(a)*70);this.terrainPunish(e)}this.hitBreakables(p.x,p.y,p.angle,170,Math.PI);this.particles.burst(p.x,p.y,'#71dfff',30,{speed:260});this.particles.ring(p.x,p.y+10,'#b06bff',190,.55,6);this.particles.ring(p.x,p.y+10,'#3fd6ff',150,.45,3);this.shake(7,.32)}}
+hit(e,amount,crit,source=null,angle=null){amount=this.eliteOnHit(e,amount);amount*=1+this.bestiaryBonus(e.type);e.hp-=amount;e.flash=.14;const a=angle??Math.atan2(e.y-this.player.y,e.x-this.player.x);
  this.particles.burst(e.x,e.y-16,crit?'#ffe490':'#79eaff',crit?22:10,{angle:a,spread:1.6,speed:crit?300:220});this.particles.burst(e.x,e.y-16,'#ffffff',4,{speed:140,size:2});this.impacts.push({x:e.x,y:e.y-18,angle:a,crit,t:.2,max:.2});
- if(crit)this.shake(4,.12);if(!e.boss&&e.state!=='lunge'){this.moveActor(e,Math.cos(a)*(crit?10:5),Math.sin(a)*(crit?10:5))}
- this.floats.push({x:e.x,y:e.y-40,text:(crit?'CRÍTICO! ':'')+Math.floor(amount),life:.9,color:crit?'#ffe16c':'#fff',size:crit?20:16});this.sound.play('hit');e.alerted=true;if(e.hp<=0){if(source){source.data.kills=(source.data.kills||0)+1;if(source.gainXP)source.gainXP(e,this)}this.kill(e)}}
-kill(e){let p=this.player,mult=this.redGate?2:1;this.enemies.splice(this.enemies.indexOf(e),1);this.corpses.push({x:e.x,y:e.y,life:12,tries:0,level:e.level,boss:e.boss,name:e.name,type:e.type,art:e.art});this.particles.burst(e.x,e.y-10,e.red?'#ff4b57':'#9fb4c8',18,{speed:160});p.gold+=(e.boss?150:rand(8,20)|0)*mult;p.xp+=(e.boss?120+e.level*10:20+e.level*4)*mult;this.quest++;if(this.quest>=15&&!this.questDone){p.points+=3;this.questDone=true;this.message('MISSÃO DIÁRIA COMPLETA · +3 PONTOS')}while(p.xp>=p.level*100){p.xp-=p.level*100;p.level++;p.points+=5;p.hp=p.maxhp;p.mp=p.maxmp;this.message(`LEVEL UP! NÍVEL ${p.level} · +5 PONTOS`)}if(e.boss){this.bossDefeated=true;this.hazards=[];this.projectiles=[];this.message('CHEFE DERROTADO · COLETE O BAÚ');this.particles.burst(e.x,e.y,'#ffb260',60,{speed:300});this.particles.ring(e.x,e.y,'#ffb260',220,.7,6);this.shake(10,.5)}SaveSystem.save(this)}
-damagePlayer(n){let p=this.player;if(p.invuln>0)return false;p.hp-=n*(1-Math.min(.6,p.stats.VIT*.008));p.invuln=.4;p.hurtTime=.22;this.shake(5,.18);this.particles.burst(p.x,p.y-16,'#ff6579',14,{speed:180});this.floats.push({x:p.x,y:p.y-50,text:'-'+Math.round(n*(1-Math.min(.6,p.stats.VIT*.008))),life:.8,color:'#ff7d8c',size:15});this.sound.play('hit');if(p.hp<=0){p.hp=0;UIManager.open('dead')}return true}
+ if(crit)this.shake(4,.12);
+ // hit-stop: golpes fortes, críticos e chefes congelam a tela por um instante
+ if(crit||amount>40||e.boss)this.hitStop=Math.max(this.hitStop,e.boss?.05:.045);
+ // combo visível: sequência de golpes do jogador sem levar dano
+ if(!source||source.isShadow){this.comboSeq++;this.comboSeqT=3;if(this.comboSeq%10===0){this.player.xp+=15;this.player.mp=Math.min(this.player.maxmp,this.player.mp+12);this.floats.push({x:this.player.x,y:this.player.y-70,text:`COMBO x${this.comboSeq} · +XP +MP`,life:1.1,color:'#7fe8ff',size:14});this.sound.play('sys')}}
+ // talento de atordoamento e efeitos dos equipamentos
+ if(!source&&Math.random()<talentLevel('for_stun')*.08){e.stun=Math.max(e.stun,.7);this.floats.push({x:e.x,y:e.y-56,text:'ATORDOADO',life:.7,color:'#ffe16c',size:11})}
+ if(!source&&Math.random()<this.bleedChance()){e.bleed=3;this.floats.push({x:e.x,y:e.y-52,text:'SANGRAMENTO',life:.7,color:'#ff6a7a',size:11})}
+ if(!source&&this.player.equipped.weapon==='barca'&&Math.random()<.4){e.hp-=6;e.flash=.12;this.particles.burst(e.x,e.y-16,'#ff8a3a',10,{kind:'ember',speed:120,lift:40});if(e.hp<=0){this.kill(e);return}}
+ if(!e.boss&&e.state!=='lunge'){this.moveActor(e,Math.cos(a)*(crit?10:5),Math.sin(a)*(crit?10:5))}
+ this.terrainPunish(e);
+ this.floats.push({x:e.x,y:e.y-40,text:(crit?'CRÍTICO! ':'')+Math.floor(amount),life:.9,color:crit?'#ffe16c':'#fff',size:crit?20:16});this.sound.play('hit',e.x,e.y);e.alerted=true;
+ if(e.hp<=0){if(source){source.data.kills=(source.data.kills||0)+1;if(source.gainXP)source.gainXP(e,this)}this.kill(e)}}
+kill(e){let p=this.player,mult=(this.redGate?2:1)*this.eliteRewardMult(e);this.enemies.splice(this.enemies.indexOf(e),1);this.eliteDeath(e);this.corpses.push({x:e.x,y:e.y,life:12,tries:0,level:e.level,boss:e.boss,name:e.name,type:e.type,art:e.art,unique:e.unique||null});this.particles.burst(e.x,e.y-10,e.red?'#ff4b57':'#9fb4c8',18,{speed:160});
+ p.gold+=Math.round((e.boss?150:rand(8,20)|0)*mult);p.xp+=Math.round((e.boss?120+e.level*10:20+e.level*4)*mult);p.kills=(p.kills||0)+1;if(this.daily)this.daily.kills++;
+ this.bestiaryKill(e);this.contractKill(this.world.kind==='dungeon'?this.world.rank:null);this.addHunterPoints(e.boss?40:e.elite?8:2);
+ if(e.boss){this.addHunterPoints(20);const drop=this.bossDrop(e);if(drop)this.gainItem(drop);if(this.classChange){this.classChangeReady=true;this.message('O CARTENON FOI CUMPRIDO · COLETE O BAÚ PARA MUDAR DE CLASSE')}}
+ // eventos de sala: o desafio conta os abates do jogador
+ if(this.roomEvent&&this.roomEvent.type==='challenge'){this.roomEvent.kills++;this.roomEvent.kills>=this.roomEvent.need&&this.resolveRoomEvent()}
+ // zona de penalidade: onda de monstros concluída
+ if(this.penalty&&this.penalty.need&&this.penalty.wave>=this.penalty.need&&!this.enemies.length){this.penalty=null;this.daily.penalty=false;this.daily.done=true;this.player.points+=2;this.message('PENALDADE CUMPRIDA · O SISTEMA ESTÁ SATISFEITO');this.sound.play('sys')}
+ // progressão de sombras únicas: patente sobe com abates
+ if(e.boss){const u=UNIQUE_SHADOWS[e.type];if(u){const sh=this.army.find(s=>s.unique===u.key);if(sh){sh.kills=(sh.kills||0)+1;sh.rank=shadowRankTitle(sh.kills)}}}
+ if(this.quest>=15&&!this.questDone){p.points+=3;this.questDone=true;this.message('MISSÃO DIÁRIA COMPLETA · +3 PONTOS')}
+ while(p.xp>=p.level*100){p.xp-=p.level*100;p.level++;p.points+=5;p.talentPoints=(p.talentPoints||0)+1;p.hp=p.maxhp;p.mp=p.maxmp;this.message(`LEVEL UP! NÍVEL ${p.level} · +5 PONTOS · +1 TALENTO`);if(p.level===CLASS_CHANGE_LEVEL&&p.playerClass<1){this.message('MUDANÇA DE CLASSE DISPONÍVEL · DUNGEON ESPECIAL DE CARTENON');this.spawnClassGate()}}
+ if(e.boss){this.bossDefeated=true;this.hazards=[];this.projectiles=[];this.hitStop=Math.max(this.hitStop,.06);this.message('CHEFE DERROTADO · COLETE O BAÚ');this.particles.burst(e.x,e.y,'#ffb260',60,{speed:300});this.particles.ring(e.x,e.y,'#ffb260',220,.7,6);this.shake(10,.5);if(this.penalty)this.penalty.wave++}
+ SaveSystem.save(this)}
+bossDrop(e){const t=e.type;if(t==='C')return 'kasaka';if(t==='S')return 'barca';if(t==='B')return 'demoncape';return null}
+spawnClassGate(){const p=this.player;const g=this.gates.spawn(this,{x:clamp(p.x+300,100,this.world.w-100),y:clamp(p.y-200,100,this.world.h-100),instant:true,rank:'C',theme:'cartenon',silent:false});if(g)g.classChange=true}
+damagePlayer(n){let p=this.player;if(p.invuln>0)return false;const red=(1-Math.min(.6,p.stats.VIT*.008))*(1-Math.min(.5,p.armor/100));p.hp-=n*red;p.invuln=.4;p.hurtTime=.22;this.shake(5,.18);this.comboSeq=0;this.comboSeqT=0;this.particles.burst(p.x,p.y-16,'#ff6579',14,{speed:180});this.floats.push({x:p.x,y:p.y-50,text:'-'+Math.round(n*red),life:.8,color:'#ff7d8c',size:15});this.sound.play('hit',p.x,p.y);if(p.hp<=0){p.hp=0;UIManager.open('dead')}return true}
 potion(type){let p=this.player;if(type==='hp'&&p.hppots>0&&p.hp<p.maxhp){p.hppots--;p.hp=Math.min(p.maxhp,p.hp+p.maxhp*.5);this.message('POÇÃO DE VIDA UTILIZADA');this.particles.burst(p.x,p.y,'#ff6b7f',18,{speed:80,lift:60})}if(type==='mp'&&p.mppots>0&&p.mp<p.maxmp){p.mppots--;p.mp=Math.min(p.maxmp,p.mp+p.maxmp*.5);this.message('POÇÃO DE MANA UTILIZADA');this.particles.burst(p.x,p.y,'#4fd5ff',18,{speed:80,lift:60})}}
 // ---- Enemy attacks ------------------------------------------------------------------------
-enemyTargets(){return [this.player,...this.soldiers.filter(s=>s.state!=='REGENERATE')]}
+enemyTargets(){return [this.player,...(this.ally?[this.ally]:[]),...this.soldiers.filter(s=>s.state!=='REGENERATE')]}
 enemyDamage(tg,amount,a,e){if(tg===this.player){if(this.damagePlayer(amount)){if(a.slow)tg.slow=Math.max(tg.slow||0,a.slow);if(a.poison)tg.poison=Math.max(tg.poison||0,a.poison)}}else tg.hurt(amount,this)}
 enemyStrike(e,a){const dmg=e.damageOf(a),col=a.color||(e.red?'#ff4b57':'#ff8a6a');e.state='recover';e.stateT=a.recover;e.swing=.25;
- if(a.kind==='melee'){for(const tg of this.enemyTargets()){const d=dist(e,tg),ang=Math.atan2(tg.y-e.y,tg.x-e.x),diff=Math.abs(Math.atan2(Math.sin(ang-e.aim),Math.cos(ang-e.aim)));if(d<a.range+14&&diff<a.arc)this.enemyDamage(tg,dmg,a,e)}this.hazards.push({kind:'claw',x:e.x,y:e.y-14,angle:e.aim,r:a.range,arc:a.arc,t:.2,max:.2,color:e.boss?'#ff4b57':'#ffd2c8'});this.particles.burst(e.x+Math.cos(e.aim)*a.range*.6,e.y-14+Math.sin(e.aim)*a.range*.6,'#ffb3a8',6,{angle:e.aim,spread:1.2,speed:160})}
- else if(a.kind==='slam'){for(const tg of this.enemyTargets())if(dist(e,tg)<a.radius)this.enemyDamage(tg,dmg,a,e);this.particles.ring(e.x,e.y+8,'#ffcf8a',a.radius,.45,6);this.particles.burst(e.x,e.y,'#c9a46a',26,{speed:240});this.shake(7,.3)}
+ if(a.kind==='melee'){for(const tg of this.enemyTargets()){const d=dist(e,tg),ang=Math.atan2(tg.y-e.y,tg.x-e.x),diff=Math.abs(Math.atan2(Math.sin(ang-e.aim),Math.cos(ang-e.aim)));if(d<a.range+14&&diff<a.arc){this.enemyDamage(tg,dmg,a,e);if(tg.isAlly)tg.hurt(dmg,this)}}this.hazards.push({kind:'claw',x:e.x,y:e.y-14,angle:e.aim,r:a.range,arc:a.arc,t:.2,max:.2,color:e.boss?'#ff4b57':'#ffd2c8'});this.particles.burst(e.x+Math.cos(e.aim)*a.range*.6,e.y-14+Math.sin(e.aim)*a.range*.6,'#ffb3a8',6,{angle:e.aim,spread:1.2,speed:160})}
+ else if(a.kind==='slam'){for(const tg of this.enemyTargets())if(dist(e,tg)<a.radius){this.enemyDamage(tg,dmg,a,e);if(tg.isAlly)tg.hurt(dmg,this)}this.particles.ring(e.x,e.y+8,'#ffcf8a',a.radius,.45,6);this.particles.burst(e.x,e.y,'#c9a46a',26,{speed:240});this.shake(7,.3)}
  else if(a.kind==='projectile'){const n=a.count||1;for(let i=0;i<n;i++){const ang=e.aim+(n>1?(i/(n-1)-.5)*a.spread*2:0);this.projectiles.push({x:e.x+Math.cos(ang)*e.radius,y:e.y-16+Math.sin(ang)*e.radius*.5,vx:Math.cos(ang)*a.speed,vy:Math.sin(ang)*a.speed,life:a.range/a.speed+.25,damage:dmg,color:a.color,size:a.size||6,atk:a,owner:e})}}
  else if(a.kind==='lunge'){e.state='lunge';e.stateT=a.dashTime;e.lungeHit=new Set();this.particles.ring(e.x,e.y+8,'#ffffff',60,.3,3)}
  else if(a.kind==='super'){const pat=a.pattern;this.shake(10,.6);this.particles.burst(e.x,e.y-20,col,50,{speed:320});
@@ -2036,20 +2393,51 @@ updateCombatFX(dt){
  this.hazards=this.hazards.filter(h=>!h.done&&!(h.kind==='claw'&&h.t<=0));
  for(const im of this.impacts)im.t-=dt;this.impacts=this.impacts.filter(im=>im.t>0);
 }
-update(dt){let p=this.player;this.time+=dt;this.checkViewLayout(dt);if(this.panel){if(this.panel==='gate'&&this.selectedGate){const el=$('#gateTime');if(el)el.textContent=fmtTime(this.selectedGate.life)}return}let today=new Date().toLocaleDateString('en-CA');if(today!==this.questDate){this.questDate=today;this.quest=0;this.questDone=false;SaveSystem.save(this)}
- p.cool-=dt;p.dashCd-=dt;p.invuln-=dt;p.stealth-=dt;p.slash-=dt;p.hurtTime-=dt;p.slow=Math.max(0,(p.slow||0)-dt);p.comboWindow=(p.comboWindow||0)-dt;p.mp=Math.min(p.maxmp,p.mp+dt*MP_REGEN);if(this.summoned)this.updateArmyMana(dt);
+update(dt){let p=this.player;
+ // Hit-stop: congela a ação por 40–60 ms em golpes fortes, críticos e na morte do chefe.
+ if(this.hitStop>0){this.hitStop-=dt;dt=Math.min(dt,.006)}
+ this.time+=dt;this.checkViewLayout(dt);
+ if(this.qte)this.qte.update(dt);
+ if(this.qte&&this.qte.done&&!this.qte.onDone)this.qte=null;
+ if(this.cutscene){this.cutscene.update(dt);this.particles.update(dt);this.updateHUD();return}
+ if(this.panel){if(this.panel==='gate'&&this.selectedGate){const el=$('#gateTime');if(el)el.textContent=fmtTime(this.selectedGate.life)}return}
+ let today=new Date().toLocaleDateString('en-CA');const dateChanged=today!==this.questDate;if(dateChanged){this.questDate=today;this.quest=0;this.questDone=false;this.dailyTick(dateChanged);SaveSystem.save(this)}
+ // ciclo dia/noite (cerca de 4 minutos por dia)
+ this.dayTime=(this.dayTime+dt/240)%1;
+ this.updateTutorial(dt);
+ p.cool-=dt;p.dashCd-=dt;p.invuln-=dt;p.stealth-=dt;p.slash-=dt;p.hurtTime-=dt;p.slow=Math.max(0,(p.slow||0)-dt);p.comboWindow=(p.comboWindow||0)-dt;p.mp=Math.min(p.maxmp,p.mp+dt*MP_REGEN);p.hp=Math.min(p.maxhp,p.hp+dt*talentLevel('vit_regen')*.4);if(this.summoned)this.updateArmyMana(dt);
+ this.exchangeCd=Math.max(0,this.exchangeCd-dt);
  if(p.poison>0){p.poison-=dt;p.poisonTick=(p.poisonTick||0)-dt;if(p.poisonTick<=0){p.poisonTick=.6;p.hp=Math.max(1,p.hp-(2+p.level*.4));this.particles.burst(p.x,p.y-20,'#7dff5a',4,{speed:40,lift:30})}}
  for(const strike of this.pendingStrikes)strike.delay-=dt;const due=this.pendingStrikes.filter(strike=>strike.delay<=0);this.pendingStrikes=this.pendingStrikes.filter(strike=>strike.delay>0);for(const strike of due)this.attack(.7,110,false,false,true,'mutilation');
  let keys=this.input.keys,dx=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0),dy=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0),n=Math.hypot(dx,dy),analog=1;
  // Analog stick (touch): 360° movement; a light push walks, a full push runs.
  const st=this.input.stick;if(!n&&st&&st.mag>.18){dx=st.x;dy=st.y;n=Math.hypot(dx,dy);analog=st.mag<.6?.6:1}
- if(p.dashTime>0){p.dashTime-=dt;dx=p.dashX;dy=p.dashY;n=1;this.particles.burst(p.x,p.y-14,'#27bfff',2,{angle:Math.atan2(-dy,-dx),spread:.6,speed:120,kind:'streak'})}
- let speed=p.dashTime>0?570:(140+p.stats.AGI*2.5)*(p.slow>0?.55:1)*analog;p.moving=!!n;if(n){p.moveAngle=Math.atan2(dy,dx);p.facing=dx||p.facing||1}
+ if(p.dashTime>0){p.dashTime-=dt;dx=p.dashX;dy=p.dashY;n=1;this.particles.burst(p.x,p.y-14,'#27bfff',2,{angle:Math.atan2(-dy,-dx),spread:.6,speed:120,kind:'streak'});
+  // usar o dash para empurrar inimigos contra o terreno
+  for(const e of this.enemies){if(e.boss)continue;const d=dist(e,p);if(d<60+e.radius){const a=Math.atan2(e.y-p.y,e.x-p.x);this.moveActor(e,Math.cos(a)*90*dt*4,Math.sin(a)*90*dt*4);this.terrainPunish(e)}}}
+ let speed=p.dashTime>0?570:(140+p.stats.AGI*2.5)*this.moveSpeedMult()*(p.slow>0?.55:1)*analog;p.moving=!!n;if(n){p.moveAngle=Math.atan2(dy,dx);p.facing=dx||p.facing||1}
  // Ice: the hunter keeps momentum and slides (velocity eases toward the input instead of snapping).
+ const px=p.x,py=p.y;
  {let vx=n?dx/n*speed:0,vy=n?dy/n*speed:0;const tz=this.world.terrainAt?this.world.terrainAt(p.x,p.y):null;
   if(tz&&tz.kind==='ice'&&!(p.dashTime>0)){const k=Math.min(1,dt*2.2);p.ivx=(p.ivx||0)+(vx-(p.ivx||0))*k;p.ivy=(p.ivy||0)+(vy-(p.ivy||0))*k;vx=p.ivx;vy=p.ivy;if(Math.hypot(vx,vy)>40&&Math.random()<dt*8)this.particles.burst(p.x,p.y+8,'#e8faff',1,{speed:30})}else{p.ivx=vx;p.ivy=vy}
   if(Math.abs(vx)+Math.abs(vy)>.5)this.moveActor(p,vx*dt,vy*dt)}
+ if(p.moving&&p.dashTime<=0){const step=Math.hypot(p.x-px,p.y-py);p.distance+=step;if(this.daily)this.daily.distance+=step}
+ if(p.moving)this.tutMove=(this.tutMove||0)+dt;
  this.terrainEffects(p,dt);
+ // combo visível: sequência de golpes sem levar dano
+ this.comboSeqT-=dt;if(this.comboSeqT<=0&&this.comboSeq>0){this.comboSeq=0}
+ if(this.daily)this.checkDaily();
+ // clima do gate vermelho: piora com o tempo
+ if(this.redGateActive&&this.redTimer>0){this.redTimer-=dt;this.weather=clamp(1-this.redTimer/90,0,1);if(this.redTimer<=0){const rk=this.world.rank;this.message('O GATE VERMELHO COLAPSOU · QUEBRA DE DUNGEON');this.returnHub();this.dungeonBreak({x:this.player.x,y:this.player.y,rank:rk,broken:false});return}}
+ // zona de penalidade: ondas de monstros até cumprir a sentença
+ if(this.penalty){this.penalty.t=(this.penalty.t||1.5)-dt;
+  if(!this.enemies.length&&this.penalty.t<=0&&this.penalty.wave<this.penalty.need){this.penalty.wave++;this.penalty.t=2.5;const n=2+this.penalty.wave;this.spawnCityMonsters(this.player.x,this.player.y,n,6+this.penalty.wave*3);this.message(`PENALDADE · ONDA ${this.penalty.wave}/${this.penalty.need}`);this.sound.play('alert')}}
+ // eventos de sala e sala secreta
+ this.roomEventCheck();this.roomEventTick(dt);this.checkSecretRoom();
+ if(this.qte&&this.qte.done&&!this.qte.onDone)this.qte=null;
+ if(this.fps){this._fpsAcc=(this._fpsAcc||0)+dt;this._fpsN=(this._fpsN||0)+1;if(this._fpsAcc>=.5){this.fpsVal=Math.round(this._fpsN/this._fpsAcc);this._fpsAcc=0;this._fpsN=0}}
+ this.aimAssist();
+ if(this.ally)this.ally.update(dt,this);
  let mx=this.input.mouse.x+this.camera.x,my=this.input.mouse.y+this.camera.y;if(this.input.touchMode){const t=this.aimTarget();if(t)p.angle=Math.atan2(t.y-p.y,t.x-p.x);else if(n)p.angle=Math.atan2(dy,dx)}else if(this.input.mouse.x||this.input.mouse.y)p.angle=Math.atan2(my-p.y,mx-p.x);else if(n)p.angle=Math.atan2(dy,dx);
  this.animation.update(dt,p);if(this.world.kind==='dungeon')this.computeFog();if(this.input.mouse.down||this.input.touchAttack)this.attack();
  if(this.world.kind==='hub'){this.combatT=Math.max(0,(this.combatT||0)-dt);this.world.update(dt);this.gates.update(dt,this)}
@@ -2057,15 +2445,133 @@ update(dt){let p=this.player;this.time+=dt;this.checkViewLayout(dt);if(this.pane
  for(let [i,s] of this.soldiers.entries()){const x=s.x,y=s.y;s.update(dt,this,i);s.animMoving=Math.hypot(s.x-x,s.y-y)>.01;s.swing=Math.max(0,(s.swing||0)-dt)}
  this.updateCombatFX(dt);this.corpses=this.corpses.filter(c=>(c.life-=dt)>0);this.particles.update(dt);this.floats=this.floats.filter(f=>(f.life-=dt)>0);for(let f of this.floats)f.y-=35*dt;this.shakeT-=dt;if(this.shakeT<=0)this.shakeMag=0;
  this.hudClock-=dt;this.updateHUD()}
+// ---- Expansão: tempo, talentos, itens, elite, terreno, quebra de dungeon ---------------------
+isNight(){return this.dayTime>.78||this.dayTime<.22}
+nightMult(){return this.isNight()?1.35:1}
+talentDmgMult(){return 1+talentLevel('for_dmg')*.10}
+critChance(){return (5+this.player.stats.PER*1.2+talentLevel('per_crit')*2)/100}
+bleedChance(){return talentLevel('per_bleed')*.12+(this.player.equipped.weapon==='kasaka'?.35:0)}
+dashCdMax(){return Math.max(.5,(1.3-this.player.stats.AGI*.01)*(1-talentLevel('agi_dash')*.07))}
+moveSpeedMult(){return 1+talentLevel('agi_speed')*.03}
+// Bonus de bestiário: 50 abates do mesmo tipo concedem +4% de dano contra ele.
+bestiaryBonus(type){const b=this.bestiary[type];return b&&b.kills>=50?.04:0}
+bestiaryKill(e){const t=e.type;if(!t)return;const b=this.bestiary[t]||(this.bestiary[t]={kills:0,seen:0});b.kills++;b.seen=Math.max(b.seen,1);if(b.kills===50){this.message(`BESTIÁRIO · ${e.name} COMPLETO · +4% DE DANO`);this.sound.play('sys')}}
+// Elite: aplica um modificador e melhora as recompensas.
+makeElite(e){if(e.boss||this.redGate&&Math.random()<.5||Math.random()<.16){e.elite=ELITE_KEYS[Math.floor(Math.random()*ELITE_KEYS.length)];e.eliteName=ELITE_MODS[e.elite].name;e.maxhp=Math.round(e.maxhp*(e.elite==='BLINDADO'?1.5:1.2));e.hp=e.maxhp;e.dmgMult*=1.15;return e}return e}
+eliteRewardMult(e){return e.elite?2:1}
+// Dano de Elite Blindado + explosão de Elite Explosivo.
+eliteOnHit(e,amount){if(e.elite==='BLINDADO')return amount*.55;return amount}
+eliteDeath(e){if(e.elite!=='EXPLOSIVO')return;const g=this;g.particles.burst(e.x,e.y-14,'#ff8a3a',34,{speed:260,kind:'ember'});g.particles.ring(e.x,e.y,'#ff8a3a',120,.4,6);g.shake(6,.3);g.sound.play('hit',e.x,e.y);
+ for(const tg of g.enemyTargets()){if(Math.hypot(tg.x-e.x,tg.y-e.y)<110){if(tg===g.player)g.damagePlayer(18);else tg.hurt(24,g)}}}
+// Usar o terreno contra os monstros: empurrar para lava/teia causa dano e lentidão.
+terrainPunish(e){const z=this.world.terrainAt?this.world.terrainAt(e.x,e.y):null;if(!z)return;
+ if(z.kind==='burn'){e.hp-=8+e.level;e.flash=.1;this.floats.push({x:e.x,y:e.y-44,text:'TERRENO!',life:.8,color:'#ff9a4a',size:12});if(e.hp<=0)this.kill(e)}
+ else if(z.kind==='slow'&&z.web){e.slowed=2.5}
+ else if(z.kind==='poison'){e.hp-=5;e.flash=.08;if(e.hp<=0)this.kill(e)}}
+// Pilares quebráveis (Cidadela de Kargalgan): abertos com golpes corpo a corpo e Autoridade.
+buildBreakables(){this.breakables=[];if(!this.world.solids)return;for(const s of this.world.solids)if(s.k==='pillar')this.breakables.push({x:s.x,y:s.y,w:s.w,h:s.h,hp:40,maxhp:40,solid:s})}
+damageBreakable(b,dmg,angle){b.hp-=dmg;this.particles.burst(b.x+b.w/2,b.y+b.h/2,'#c9b08a',8,{speed:180,angle:angle??0,spread:1.4});
+ if(b.hp<=0){const i=this.world.solids.indexOf(b.solid);if(i>=0)this.world.solids.splice(i,1);for(const p of this.world.props||[])if(p.solid&&p.x>=b.x-2&&p.x<=b.x+b.w+2&&p.y>=b.y-2&&p.y<=b.y+b.h+2)p.dead=true;
+  if(this.world.wallLayer!==undefined){try{this.world.wallLayer=DungeonArt.bake(this.world)}catch(e){}}
+  this.particles.burst(b.x+b.w/2,b.y+b.h/2,'#e8c89a',30,{speed:260});this.shake(5,.25);this.message('PILAR DESTRUÍDO · PASSAGEM ABERTA');this.sound.play('hit',b.x,b.y);return true}return false}
+hitBreakables(x,y,angle,range,arc){for(const b of this.breakables||[]){const cx=b.x+b.w/2,cy=b.y+b.h/2,d=Math.hypot(cx-x,cy-y);if(d<range+20){const a=Math.atan2(cy-y,cx-x),diff=Math.abs(Math.atan2(Math.sin(a-angle),Math.cos(a-angle)));if(Math.abs(diff)<arc)this.damageBreakable(b,10,angle)}}}
+// Fases do chefe: 50% e 20% de HP mudam o padrão, invocam ajudantes e reagem ao cenário.
+bossPhase(e,ph){this.message(`⚠ ${e.name} · FASE ${ph}`);this.shake(8,.5);this.sound.play('alert');e.dmgMult*=1.12;
+ const n=ph===3?3:2;for(let i=0;i<n;i++){const def=MONSTER_TYPES[GATE_MONSTERS(RANKS.indexOf(this.world.rank||'E'))[0]]||MONSTER_TYPES.goblin;
+  const sp=this.findFreeSpot(e.x,e.y,def.radius,e.radius+20,200,{avoid:this.enemies,sep:def.radius*2+6,los:true,angle:rand(0,Math.PI*2)});if(!sp)continue;
+  const m=new Enemy(sp.x,sp.y,GATE_MONSTERS(RANKS.indexOf(this.world.rank||'E'))[0],Math.max(1,e.level-2),false,{red:e.red});m.alerted=true;m.home={x:e.home.x,y:e.home.y};this.enemies.push(m);this.particles.burst(m.x,m.y,'#a855f7',18)}
+ this.sceneryReact(this.world.theme?this.world.theme.id:'',ph);
+ // QTE decisivo: acerte a tecla na zona para enfraquecer o chefe; falhar o deixa mais agressivo.
+ if(!this.qte&&!this.cutscene&&ph>=2)this.startQTE({key:' ',dur:1.7,zone:[.34,.66],label:'APERTE ESPAÇO · ENFRAQUECER',onDone:ok=>{if(ok){e.stun=Math.max(e.stun||0,2.2);e.hp-=e.maxhp*.06;this.hitStop=Math.max(this.hitStop,.05);this.message('QTE VENCIDO · CHEFE ENFRAQUECIDO');this.sound.play('sys')}else{this.message('QTE FALHOU · O CHEFE CONTRA-ATACA');e.dmgMult*=1.12;this.sound.play('alert')}}})}
+sceneryReact(themeId,ph){this.scenery=this.scenery||{};
+ if(themeId==='cartenon'){this.scenery.statuesAwake=true;for(const p of this.world.props||[])if(p.k==='statue')p.awake=true;this.message('AS ESTÁTUAS DE CARTENON SE MEXEM')}
+ if(themeId==='volcanic'){this.scenery.lavaRise=ph;this.message('A LAVA SOBE NA FORTALEZA VULCÂNICA');
+  for(let i=0;i<ph;i++){const r=this.world.rooms[Math.floor(rand(0,9))];if(!r)continue;const z={kind:'burn',name:'LAVA',color:'#e2481c',x:r.cx+rand(-120,120),y:r.cy+rand(-70,70),rx:40+ph*10,ry:26+ph*6,lava:true,seed:rand(0,9)};this.world.zones.push(z)}}
+ if(themeId==='kargalgan'){this.scenery.runes=ph;this.message('OS CÍRCULOS MÁGICOS PULSAM COM FÚRIA')}
+ if(themeId==='glacial'){this.weather=Math.max(this.weather,ph*.4);this.message('A NEVASCA PIORA')}}
+// O cenário da dungeon reage ao clima do gate vermelho (a lava sobe com o tempo).
+drawDungeonWeather(c){const w=this.world,t=this.time,ox=this.camera.x,oy=this.camera.y,W=canvas.width,H=canvas.height;
+ const id=w.theme?w.theme.id:null;if(id!=='volcanic'&&id!=='glacial'&&id!=='ash')return;
+ if(id==='volcanic'){const k=this.weather||0;c.save();c.globalCompositeOperation='lighter';const g=c.createLinearGradient(0,oy+H,0,oy+H-k*120);g.addColorStop(0,'rgba(255,90,20,.28)');g.addColorStop(1,'rgba(255,90,20,0)');c.fillStyle=g;c.fillRect(ox,oy,W,H);
+  for(let i=0;i<Math.ceil(k*8);i++){const x=ox+((i*397+t*40)%(W+200))-100,y=oy+((i*211+t*60)%(H+120))-60;c.fillStyle=i%2?'#ffb04a':'#ff5a1a';c.globalAlpha=.5;c.fillRect(x,y,2,2)}c.restore()}
+ if(id==='glacial'){const k=this.weather||0;c.save();c.fillStyle='#e8fbff';for(let i=0;i<Math.ceil(30+k*60);i++){const x=ox+((i*173+t*(30+i*3))%(W+120))-60,y=oy+((i*97+t*(50+i*5))%(H+80))-40;c.globalAlpha=.4+.3*Math.sin(t*3+i);c.fillRect(x,y,2,2)}c.restore()}}
+// Quebra de dungeon: um gate que expira sem dono solta monstros na cidade e os NPCs fogem.
+dungeonBreak(gate){if(gate.broken)return;gate.broken=true;this.message('⚠ QUEBRA DE DUNGEON · MONSTROS NA CIDADE');this.sound.play('alert');
+ const n=4+RANKS.indexOf(gate.rank)*2;this.spawnCityMonsters(gate.x,gate.y,n,3+RANKS.indexOf(gate.rank)*6);
+ for(const a of this.world.npcs?this.world.npcs.list:[]){if(Math.hypot(a.x-gate.x,a.y-gate.y)<700){a.state='flee';a.timer=rand(5,9);a.threatPos={x:gate.x,y:gate.y};a.shout('!')}}}
+spawnCityMonsters(x,y,n,level){const types=['goblin','wolf','spider','orc','demon'];for(let i=0;i<n;i++){const type=types[Math.min(types.length-1,Math.floor(rand(0,types.length)))];const def=MONSTER_TYPES[type];
+ const sp=this.findFreeSpot(x,y,def.radius,30,260,{avoid:this.enemies,sep:def.radius*2+8,ignoreCars:true})||{x:x+rand(-80,80),y:y+rand(-80,80)};
+ const e=new Enemy(sp.x,sp.y,type,level,false,{red:Math.random()<.2});e.alerted=true;this.enemies.push(e);this.makeElite(e)}this.updateHUD()}
+// ---- Expansão: missões diárias, contratos, rank de caçador -----------------------------------
+checkDaily(){const d=this.daily;if(!d||d.done)return;d.kills=Math.min(100,d.kills);d.dashes=Math.min(100,d.dashes);d.distance=Math.min(10000,Math.floor(d.distance));
+ if(d.kills>=100&&d.dashes>=100&&d.distance>=10000){d.done=true;this.player.points+=3;this.player.gold+=150;this.message('MISSÃO DIÁRIA COMPLETA · +3 PONTOS · +150 G');this.sound.play('sys')}}
+dailyTick(dateChanged){if(dateChanged){const d=this.daily;if(d&&!d.done&&!d.penalty){d.penalty=true;this.message('VOCÊ NÃO CUMPRIU A MISSÃO · ZONA DE PENALIDADE DISPONÍVEL');this.spawnPenaltyGate()}this.daily={date:new Date().toLocaleDateString('en-CA'),kills:0,dashes:0,distance:0,done:false,penalty:false};this.rollContracts()}}
+spawnPenaltyGate(){if(!this.gates)return;const p=this.player;const g=this.gates.spawn(this,{x:clamp(p.x+260,100,this.world.w-100),y:clamp(p.y-160,100,this.world.h-100),instant:true,rank:'C',theme:'desert',silent:false});if(g){g.penalty=true;g.red=true;this.message('PORTAL DA ZONA DE PENALIDADE ABERTO')}}
+rollContracts(){const top=clamp(this.unlocked||0,0,5);this.contracts=CONTRACT_TIERS.slice(0,Math.max(2,top+1)).slice(-3).map(t=>({rank:t.rank,need:t.need,reward:t.reward,kills:0,done:false,taken:false}));this.activeContract=-1}
+acceptContract(i){const c=this.contracts[i];if(!c||c.done)return;if(this.activeContract>=0){this.message('JÁ EXISTE UM CONTRATO ATIVO');return}c.taken=true;this.activeContract=i;this.message(`CONTRATO RANK ${c.rank} ACEITO · ${c.need} ABATES`)}
+contractKill(rank){const i=this.activeContract;if(i<0)return;const c=this.contracts[i];if(!c)return;c.kills++;if(c.kills>=c.need){c.done=true;this.activeContract=-1;this.player.gold+=c.reward;this.player.points+=2;this.addHunterPoints(20);this.message(`CONTRATO RANK ${c.rank} CONCLUÍDO · +${c.reward} G`);this.sound.play('sys')}}
+addHunterPoints(n){this.hunter.points+=n;const idx=HUNTER_THRESH.filter(t=>this.hunter.points>=t).length-1;const newRank=RANKS[clamp(idx,0,5)];
+ if(newRank!==this.hunter.rank){this.hunter.rank=newRank;this.hunter.evalReady=true;this.message(`REAVALIAÇÃO DE RANK DISPONÍVEL · RANK ${newRank}`);this.sound.play('sys');this.spawnEvalGate()}}
+spawnEvalGate(){const p=this.player;const g=this.gates.spawn(this,{x:clamp(p.x-260,100,this.world.w-100),y:clamp(p.y+160,100,this.world.h-100),instant:true,rank:this.hunter.rank,red:false,silent:false});if(g)g.eval=true}
+// ---- Expansão: itens, talentos, melhorias de sombra ------------------------------------------
+gainItem(id){if(!ITEMS[id])return;if(!this.player.items.includes(id))this.player.items.push(id);this.message(`ITEM OBTIDO · ${ITEMS[id].name}`);this.sound.play('sys')}
+equipItem(id){const it=ITEMS[id];if(!it||!this.player.items.includes(id))return;this.player.equipped[it.slot]=this.player.equipped[it.slot]===id?null:id;this.message(`${it.name} ${this.player.equipped[it.slot]?'EQUIPADO':'DESEQUIPADO'}`)}
+spendTalent(id){const p=this.player;let node=null;for(const k in TALENTS){const f=TALENTS[k].nodes.find(n=>n.id===id);if(f){node=f;break}}if(!node)return;if((p.talents[id]||0)>=node.max){this.message('TALENTO NO MÁXIMO');return}if(p.talentPoints<=0){this.message('SEM PONTOS DE TALENTO');return}p.talents[id]=(p.talents[id]||0)+1;p.talentPoints--;const r=p.hp/p.maxhp;p.hp=Math.round(p.maxhp*r);this.message(`TALENTO · ${node.name} ${p.talents[id]}/${node.max}`);this.sound.play('sys')}
+shadowCap(){return armyCap(this.player)+talentLevel('int_cap')}
+shadowPowerMult(){let m=this.player.shadowPowerMult*(1+talentLevel('int_power')*.06);if(this.isNight())m*=1.1;return m}
+// Troca de lugar com uma sombra (Shadow Exchange): teleporte com recarga longa.
+shadowExchange(){const p=this.player;if(this.exchangeCd>0){this.message(`TROCA EM RECARGA · ${Math.ceil(this.exchangeCd)}s`);return}if(!this.soldiers||!this.soldiers.length){this.message('NENHUMA SOMBRA EM CAMPO');return}
+ let best=null,bd=1e9;for(const s of this.soldiers){if(s.state==='REGENERATE')continue;const d=dist(s,p);if(d<bd){bd=d;best=s}}if(!best){this.message('NENHUMA SOMBRA DISPONÍVEL');return}
+ const sp=this.findFreeSpot(p.x,p.y,Math.min(24,best.radius),0,120,{avoid:[p,...this.soldiers.filter(s=>s!==best)],sep:20});
+ const ox=p.x,oy=p.y;p.x=best.x;p.y=best.y;best.x=sp?sp.x:ox;best.y=sp?sp.y:oy;p.invuln=Math.max(p.invuln,.5);this.exchangeCd=20;this.animation.play('summon',p,.4);this.animation.effect('summon',p);this.particles.burst(ox,oy,'#a855f7',20);this.particles.burst(p.x,p.y,'#a855f7',20);this.message('SHADOW EXCHANGE');this.sound.play('shadow')}
+cycleArmyOrder(){const orders=['ATTACK','DEFEND','HOLD'];this.armyOrder=orders[(orders.indexOf(this.armyOrder)+1)%orders.length];this.message(`ORDEM DAS SOMBRAS · ${this.armyOrder==='ATTACK'?'ATACAR O ALVO':this.armyOrder==='DEFEND'?'DEFENDER O JOGADOR':'MANTER POSIÇÃO'}`);this.sound.play('sys')}
+dismissShadow(i){const s=this.army[i];if(!s)return;this.army.splice(i,1);this.soldiers=[];this.summoned=false;this.message('SOMBRA DISPENSADA');SaveSystem.save(this)}
+// ---- Expansão: cutscenes, QTE, tutorial, histórico -------------------------------------------
+startCutscene(lines,opts){this.cutscene=new Cutscene(lines,opts);return this.cutscene}
+advanceCutscene(){if(this.cutscene)this.cutscene.advance()}
+advanceCutscene(){if(this.cutscene)this.cutscene.advance()}
+startQTE(opts){this.qte=new QTE(opts);return this.qte}
+updateTutorial(dt){if(this.tutorialDone)return;const st=TUTORIAL_STEPS[this.tutorial.step];if(!st){this.tutorialDone=1;SaveSystem.save(this);return}
+ if(st.id==='done'){this.tutT+=dt;if(this.tutT>1.6){this.tutorialDone=1;SaveSystem.save(this);this.message('TUTORIAL CONCLUÍDO');this.sound.play('sys')}return}
+ if(st.check(this)){this.tutorial.step++;this.tutT=0;this.sound.play('sys');if(this.tutorial.step>=TUTORIAL_STEPS.length){this.tutorialDone=1;SaveSystem.save(this)}}}
+// ---- Expansão: eventos aleatórios de sala e sala secreta --------------------------------------
+roomEventCheck(){const w=this.world;if(w.kind!=='dungeon'||this.roomEvent)return;const r=this.roomAt(this.player.x,this.player.y);if(r<0||r===this.eventRoom)return;this.eventRoom=r;if(r===3||Math.random()>.2)return;
+ const roll=Math.random();if(roll<.4){this.roomEvent={type:'trap',room:r,armed:true};this.message('BAÚ ARMADILHADO DETECTADO')}else if(roll<.7){this.roomEvent={type:'hunter',room:r,done:false};this.message('UM CAÇADOR FERIDO PEDIU AJUDA')}else{this.roomEvent={type:'challenge',room:r,t:45,need:5,kills:0};this.message('SALA DE DESAFIO · ABATA 5 EM 45s')}}
+roomEventTick(dt){const ev=this.roomEvent;if(!ev)return;if(ev.type==='challenge'){ev.t-=dt;if(ev.t<=0){this.message('DESAFIO FALHOU · O TEMPO ACABOU');this.roomEvent=null;return}if(ev.kills>=ev.need){this.player.gold+=120;this.player.points+=1;this.message('DESAFIO VENCIDO · +120 G');this.sound.play('sys');this.roomEvent=null}}}
+resolveRoomEvent(){const ev=this.roomEvent;if(!ev)return false;if(ev.type==='challenge'){if(ev.kills>=ev.need){this.player.gold+=120;this.player.points+=1;this.message('DESAFIO VENCIDO · +120 G');this.sound.play('sys');this.roomEvent=null;return true}}return false}
+checkSecretRoom(){const w=this.world;if(w.kind!=='dungeon'||!w.secret||w.secret.revealed)return;const s=w.secret;
+ if(this.player.stats.PER>=18){this.revealSecret();return}
+ // parede rachada: aproximação revela
+ if(this._secretCheck===0){const dx=this.player.x-s.crack.x,dy=this.player.y-s.crack.y;if(Math.hypot(dx,dy)<70)this.revealSecret()}}
+revealSecret(){const w=this.world;if(!w.secret||w.secret.revealed)return;w.secret.revealed=true;this.secretRevealed=true;
+ if(!w.rooms.includes(w.secret.room))w.rooms.push(w.secret.room);
+ w.walkable.push(w.secret.room,w.secret.corridor);w.corridors.push(w.secret.corridor);w.rooms.forEach(r=>{if(r.id===w.secret.adj)r.links.push(99)});
+ const sr=w.secret.room;w.props=w.props||[];w.props.push({k:'crystal',x:sr.cx-46,y:sr.cy-6,s:1.25,v:.4},{k:'crystal',x:sr.cx+52,y:sr.cy+18,s:.9,v:.7},{k:'rubble',x:sr.cx+8,y:sr.cy-34,s:1,v:.2});
+ w.lights=w.lights||[];w.lights.push({x:sr.cx,y:sr.cy-20,r:190,c:(w.theme&&w.theme.pal.acc)||'#ffd27a',f:1,seed:3});
+ this.world.wallLayer=DungeonArt.bake(w);this.message('SALA SECRETA REVELADA');this.sound.play('sys');this.particles.ring(this.player.x,this.player.y,'#ffd27a',160,.6,5);
+ this.player.gold+=150}
+// ---- Expansão: aliado de história --------------------------------------------------------------
+spawnAlly(look,name){const p=this.player;const sp=this.findFreeSpot(p.x,p.y,14,20,120,{avoid:[p],sep:24})||{x:p.x+30,y:p.y};this.ally=new Ally(sp.x,sp.y,look||PEOPLE.hunters[2],name);this.message(`${this.ally.name} ENTROU NA DUNGEON`)}
+removeAlly(){this.ally=null}
+// ---- Expansão: nova cidade (Jeju / Busan) -----------------------------------------------------
+travelToCity(idx){this.cityIndex=idx;this.newCityUnlocked=true;if(idx===0){this.world=new WorldMap();this.player.x=HUB.spawn.x;this.player.y=HUB.spawn.y;this.message('SEOUL · ASSOCIAÇÃO DOS CAÇADORES')}
+ else{this.world=makeSecondCity();const c=THIS_CITY2.spawn;this.player.x=c.x;this.player.y=c.y;this.message('BUSAN · DISTRITO COSTEIRO')}
+ this.gates=new GateSystem();this.gates.update(0,this);this.rollContracts();this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.projectiles=[];this.hazards=[];this._camSnap=true;this.resize();SaveSystem.save(this)}
 district(p){for(const z of CITY.zones)if(p.x>z.x&&p.x<z.x+z.w&&p.y>z.y&&p.y<z.y+z.h)return z.name;for(const a of CITY.spawnAreas)if(a.w<3000&&a.h<2000&&p.x>a.x&&p.x<a.x+a.w&&p.y>a.y&&p.y<a.y+a.h)return a.name;return p.y>RIVER.y?(p.x>4400?'YONGSAN LESTE':'YONGSAN'):p.y<700?'DISTRITO DAS GUILDAS':p.x>4400?'JONGNO':p.x>3040?'DISTRITO COMERCIAL':p.x<1000?'GANGNAM OESTE':'CENTRO DE SEUL'}
-updateHUD(){let p=this.player;$('#rank').textContent='RANK '+p.rank;$('#level').textContent='LV. '+String(p.level).padStart(2,'0');$('#hpbar').style.width=clamp(p.hp/p.maxhp*100,0,100)+'%';$('#mpbar').style.width=clamp(p.mp/p.maxmp*100,0,100)+'%';$('#hptext').textContent=`${Math.ceil(p.hp)}/${p.maxhp}`;$('#mptext').textContent=`${Math.ceil(p.mp)}/${p.maxmp}`;$('#hppots').textContent='HP ×'+p.hppots;$('#mppots').textContent='MP ×'+p.mppots;$('#questcount').textContent=Math.min(15,this.quest)+' / 15';const ac=$('#armycount'),drain=this.armyDrain(),cost=armySummonCost(p,this.army);if(ac){ac.textContent=this.summoned?`−${fmtRate(drain)} MP/s`:`SOMBRAS ${this.army.length}/${armyCap(p)}`;ac.title=this.summoned?'Mana gasta por segundo pelas sombras ativas':`Sombras no exército / capacidade máxima · invocar custa ${cost} MP`}
+updateHUD(){let p=this.player;const cap=this.shadowCap();const rankIdx=RANKS.indexOf(p.rank),hunter=this.hunter||{rank:'E',points:0};const hNext=rankIdx<5?HUNTER_THRESH[rankIdx+1]:null;const hTxt=`RANK ${p.rank}${hNext?` · ${hunter.points}/${hNext}`:` · MÁX`} · ${CLASSES[p.playerClass].name}`;const rk=$('#rank');if(rk){rk.textContent=hTxt;rk.style.color=CLASSES[p.playerClass].color}
+ $('#level').textContent='LV. '+String(p.level).padStart(2,'0');$('#hpbar').style.width=clamp(p.hp/p.maxhp*100,0,100)+'%';$('#mpbar').style.width=clamp(p.mp/p.maxmp*100,0,100)+'%';$('#hptext').textContent=`${Math.ceil(p.hp)}/${p.maxhp}`;$('#mptext').textContent=`${Math.ceil(p.mp)}/${p.maxmp}`;$('#hppots').textContent='HP ×'+p.hppots;$('#mppots').textContent='MP ×'+p.mppots;$('#questcount').textContent=Math.min(15,this.quest)+' / 15';const ac=$('#armycount'),drain=this.armyDrain(),cost=armySummonCost(p,this.army);if(ac){ac.textContent=this.summoned?`−${fmtRate(drain)} MP/s`:`SOMBRAS ${this.army.length}/${cap}`;ac.title=this.summoned?'Mana gasta por segundo pelas sombras ativas':`Sombras no exército / capacidade máxima · invocar custa ${cost} MP`}
+ const dg=$('#dailyGoals');if(dg){const d=this.daily||{kills:0,dashes:0,distance:0};const km=Math.min(10,Math.floor((d.distance||0)/1000));dg.innerHTML=`<span title="Flexões = abates">💪 ${Math.min(d.kills||0,100)}/100</span><span title="Abdominais = esquivas">🌀 ${Math.min(d.dashes||0,100)}/100</span><span title="Corrida">🏃 ${km}/10 km</span><span class="${d.done?'ok':''}">${d.done?'✔ CUMPRIDA':d.penalty?'⚠ PENALDADE':''}</span>`}
  const am=$('#armyMana');if(am){am.classList.toggle('hidden',!this.summoned);if(this.summoned){const up=this.soldiers.filter(s=>s.state!=='REGENERATE').length,net=MP_REGEN-drain;am.innerHTML=`<span>♟ ${up}/${this.soldiers.length}<em> ATIVAS</em></span><span>${fmtTime(this.armyT||0)}</span><b>−${fmtRate(drain)} MP/s</b>`;am.title=`Saldo de mana: ${net>=0?'+':'−'}${fmtRate(Math.abs(net))} MP/s (regeneração +${fmtRate(MP_REGEN)}/s)`}}
- const mm=$('#mpbar');if(mm&&mm.parentNode&&mm.parentNode.parentNode&&mm.parentNode.parentNode.classList)mm.parentNode.parentNode.classList.toggle('drain',this.summoned&&drain>MP_REGEN);$('#questfill').style.width=Math.min(100,this.quest/15*100)+'%';
- let hub=this.world.kind==='hub',zone=hub?this.district(p):'';const th=this.world.theme;$('#location').textContent=hub?zone:(th?`${th.short} · RANK ${this.world.rank}`:`DUNGEON · RANK ${this.world.rank}`);$('#locationSub').textContent=hub?(zone==='HUNTERS ASSOCIATION'?'SAFE ZONE · SEOUL':'CIDADE · SEOUL'):(this.redGate?'GATE VERMELHO · SEM SAÍDA':'SUBJUGUE O CHEFE');$('#zoneLabel').textContent=hub?zone:(th?th.name:'DUNGEON RANK '+this.world.rank);
+ const mm=$('#mpbar');if(mm&&mm.parentNode&&mm.parentNode.parentNode&&mm.parentNode.parentNode.classList)mm.parentNode.parentNode.classList.toggle('drain',this.summoned&&drain>MP_REGEN);const qf=$('#questfill');if(qf)qf.style.width=Math.min(100,this.quest/15*100)+'%';
+ const isCity=this.world.kind==='hub'||this.world.kind==='city2';
+ let hub=this.world.kind==='hub',zone=hub?this.district(p):'';const th=this.world.theme;const loc=$('#location');if(loc)loc.textContent=isCity?(this.world.kind==='city2'?'BUSAN · LITORAL':zone):(th?`${th.short} · RANK ${this.world.rank}`:`DUNGEON · RANK ${this.world.rank}`);const ls=$('#locationSub');if(ls)ls.textContent=isCity?(this.world.kind==='city2'?'CIDADE · BUSAN':zone==='HUNTERS ASSOCIATION'?'SAFE ZONE · SEOUL':'CIDADE · SEOUL'):(this.redGate?'GATE VERMELHO · SEM SAÍDA':'SUBJUGUE O CHEFE');const zl=$('#zoneLabel');if(zl)zl.textContent=isCity?(this.world.kind==='city2'?'BUSAN':zone):(th?th.name:'DUNGEON RANK '+this.world.rank);
  let boss=this.enemies.find(e=>e.boss);$('#bossbar').classList.toggle('hidden',!boss||dist(p,boss)>520||!(this.fogVisible(boss)||boss.alerted));if(boss){$('#bossname').textContent=boss.name;$('#bossfill').style.width=Math.max(0,boss.hp/boss.maxhp*100)+'%';$('#bossskill').textContent=boss.state==='windup'?'⚠ '+boss.current.name:''}
- let hint='';if(hub){const gate=this.gates.nearest(p);if(gate)hint=`[ E ] ENTRAR NO GATE ${gate.red?'VERMELHO':'AZUL'} · RANK ${gate.rank}`;else if(dist(p,HUB.merchant)<100)hint='[ E ] FALAR COM MERCADOR';else if(dist(p,HUB.healer)<100)hint='[ E ] CURAR HP E MP'}else if(this.corpses.some(c=>dist(c,p)<75))hint='[ E ] ERGA-SE';else if(this.bossDefeated&&!this.chest&&dist(p,{x:1500,y:600})<90)hint='[ E ] ABRIR BAÚ';else if(this.chest&&dist(p,{x:1560,y:650})<110)hint='[ E ] RETORNAR À CIDADE';$('#interact').classList.toggle('hidden',!hint);$('#interact').textContent=Mobile.on?hint.replace('[ E ] ','▶ '):hint;Mobile.sync(this,hub?zone:`DUNGEON · RANK ${this.world.rank}`);
- if(this.hudClock<=0){this.hudClock=.25;const list=hub?[...this.gates.list].sort((a,b)=>dist(a,p)-dist(b,p)):[];$('#gatecount').textContent=hub?String(list.length):'—';
-  $('#gateList').innerHTML=!hub?'<p class="gate-empty">Rastreamento indisponível dentro da dungeon.</p>':list.length?list.map(g=>{const a=Math.atan2(g.y-p.y,g.x-p.x),arrow='→↘↓↙←↖↑↗'[((Math.round(a/(Math.PI/4))%8)+8)%8];return `<div class="gate-row ${g.red?'red':'blue'} ${g.life<GATE_RULES.warnAt?'unstable':''}"><i></i><b>RANK ${g.rank}</b><span>${g.forming>0?'FORMANDO…':fmtTime(g.life)}</span><small>${g.district} · ${Math.round(dist(g,p)/10)}m ${arrow}</small></div>`}).join(''):'<p class="gate-empty">Nenhum gate ativo. Aguarde o próximo alerta…</p>'}}
+ let hint='';if(this.world.kind==='hub'){const gate=this.gates.nearest(p);if(gate)hint=`[ E ] ENTRAR NO GATE ${gate.red?'VERMELHO':'AZUL'} · RANK ${gate.rank}`;else if(dist(p,HUB.merchant)<100)hint='[ E ] FALAR COM MERCADOR';else if(dist(p,HUB.healer)<100)hint='[ E ] CURAR HP E MP';else if(dist(p,HUB.contractBoard)<90)hint='[ E ] QUADRO DE CONTRATOS';else if(dist(p,HUB.jinho)<90)hint='[ E ] FALAR COM YOO JIN-HO';else if(dist(p,HUB.portal2)<90)hint='[ E ] VIAJAR PARA BUSAN'}
+ else if(this.world.kind==='city2'){const gate=this.gates.nearest(p);if(gate)hint=`[ E ] ENTRAR NO GATE ${gate.red?'VERMELHO':'AZUL'} · RANK ${gate.rank}`;else if(this.world.portal&&dist(p,this.world.portal)<90)hint='[ E ] VOLTAR PARA SEOUL'}
+ else if(this.corpses.some(c=>dist(c,p)<75))hint='[ E ] ERGA-SE';else if(this.bossDefeated&&!this.chest&&dist(p,{x:1500,y:600})<90)hint='[ E ] ABRIR BAÚ';else if(this.chest&&dist(p,{x:1560,y:650})<110)hint='[ E ] RETORNAR À CIDADE';else if(this.roomEvent&&this.roomEvent.type==='challenge')hint=`DESAFIO · ${this.roomEvent.kills}/${this.roomEvent.need} · ${Math.ceil(this.roomEvent.t)}s`;
+ $('#interact').classList.toggle('hidden',!hint);$('#interact').textContent=Mobile.on?hint.replace('[ E ] ','▶ '):hint;Mobile.sync(this,this.world.kind==='hub'?zone:(this.world.kind==='city2'?'BUSAN · LITORAL':`DUNGEON · RANK ${this.world.rank}`));
+ if(this.hudClock<=0){this.hudClock=.25;const list=(hub||this.world.kind==='city2')?[...this.gates.list].sort((a,b)=>dist(a,p)-dist(b,p)):[];const gc=$('#gatecount');if(gc)gc.textContent=(hub||this.world.kind==='city2')?String(list.length):'—';
+  const gl=$('#gateList');if(gl)gl.innerHTML=!(hub||this.world.kind==='city2')?'<p class="gate-empty">Rastreamento indisponível dentro da dungeon.</p>':list.length?list.map(g=>{const a=Math.atan2(g.y-p.y,g.x-p.x),arrow='→↘↓↙←↖↑↗'[((Math.round(a/(Math.PI/4))%8)+8)%8];return `<div class="gate-row ${g.red?'red':'blue'} ${g.life<GATE_RULES.warnAt?'unstable':''}"><i></i><b>RANK ${g.rank}</b><span>${g.forming>0?'FORMANDO…':fmtTime(g.life)}</span><small>${g.district} · ${Math.round(dist(g,p)/10)}m ${arrow}</small></div>`}).join(''):'<p class="gate-empty">Nenhum gate ativo. Aguarde o próximo alerta…</p>'}}
 // ---- Rendering ----------------------------------------------------------------------------
 drawEnemy(e){const c=ctx,moving=e.animMoving,pose=e.state==='windup'?'windup':(e.state==='lunge'||(e.state==='recover'&&e.current&&e.stateT>e.current.recover-.2))?'strike':moving?'move'+(Math.floor(e.animT*(e.speed/12))%4):'idle'+(Math.floor(e.animT*2)%2),f=this.sprites.monster(e.art,pose);
  c.save();c.translate(Math.round(e.x),Math.round(e.y));c.fillStyle='#0009';c.beginPath();c.ellipse(0,4,e.radius*1.1,e.radius*.4,0,0,7);c.fill();
@@ -2089,6 +2595,7 @@ drawShadow(a){const c=ctx;
  if(Math.random()<.15)this.particles.burst(a.x+rand(-.6,.6)*a.radius,a.y-rand(0,f.ay*.8),Math.random()<.5?'#3b1466':'#7b2cff',1,{speed:20,lift:40,kind:'sq'});
  this.drawShadowHUD(a,a.y-f.ay+(f.top||0)-8)}
 drawShadowHUD(a,top){const c=ctx,w=Math.round(Math.max(40,Math.min(72,a.radius*2.2))),x=Math.round(a.x-w/2),y=Math.round(top),k=clamp(a.hp/a.maxhp,0,1);
+ if(a.unique){c.fillStyle='#ffd27a';c.font='bold 9px monospace';c.textAlign='center';c.fillText(a.name.toUpperCase(),a.x,y-10);c.textAlign='left'}
  c.save();c.globalAlpha=1;c.fillStyle='#05020bcc';c.fillRect(x-1,y-1,w+2,6);c.fillStyle='#2a1440';c.fillRect(x,y,w,4);c.fillStyle=a.state==='REGENERATE'?'#4a3a66':k<.3?'#ff5ad0':'#9b5bff';c.fillRect(x,y,w*k,4);c.fillStyle='#8ff0ff';c.fillRect(x,y,w*k,1);
  const label=`LV ${a.level}${a.boss?' ★':''}`;c.font='bold 10px monospace';c.textAlign='center';c.lineWidth=3;c.strokeStyle='#05020b';c.strokeText(label,a.x,y-3);c.fillStyle=a.boss?'#ffd27a':'#d7b8ff';c.fillText(label,a.x,y-3);c.textAlign='left';c.restore()}
 drawTelegraph(e){const a=e.current,k=1-e.stateT/a.windup,c=ctx;c.save();c.globalAlpha=.18+.3*k;c.fillStyle=a.kind==='super'?(a.color||'#ff3b4f'):'#ff3b4f';c.strokeStyle='#ff6a7a';c.lineWidth=2;
@@ -2114,8 +2621,9 @@ draw(){ctx.clearRect(0,0,canvas.width,canvas.height);if(!this.started){ctx.fillS
  if(this.bossDefeated&&!this.chest){ctx.fillStyle='#3b211a';ctx.fillRect(1477,580,46,32);ctx.fillStyle='#e9b950';ctx.fillRect(1477,586,46,5);ctx.fillRect(1497,582,5,29);ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=.3+.2*Math.sin(this.time*4);ctx.fillStyle='#ffd27a';ctx.beginPath();ctx.arc(1500,596,40,0,7);ctx.fill();ctx.restore()}
  for(const e of this.enemies)if(e.state==='windup'&&this.fogVisible(e))this.drawTelegraph(e);
  this.animation.drawGhosts(ctx);this.animation.draw(ctx,'under');
- let actors=[...this.enemies.filter(e=>this.fogVisible(e)),...this.soldiers,p,...(this.world.npcs?this.world.npcs.visible(view):[])].sort((a,b)=>a.y-b.y);
- for(let a of actors){if(a.isCityNPC){a.draw(ctx,this);continue}if(a===p){
+ let actors=[...this.enemies.filter(e=>this.fogVisible(e)),...this.soldiers,p,...(this.world.npcs?this.world.npcs.visible(view):[])];if(this.ally)actors.push(this.ally);
+ actors.sort((a,b)=>a.y-b.y);
+ for(let a of actors){if(a.isCityNPC){a.draw(ctx,this);continue}if(a.isAlly){a.draw(ctx,this);continue}if(a===p){
    // The hero is always rendered at full opacity (no post-dash transparency).
    ctx.globalAlpha=1;ctx.fillStyle='#0009';ctx.beginPath();ctx.ellipse(a.x,a.y+9,15,5,0,0,7);ctx.fill();
    if(p.stealth>0){ctx.save();ctx.globalCompositeOperation='lighter';ctx.strokeStyle='#5a6bff';ctx.globalAlpha=.45*Math.min(1,p.stealth);ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(a.x,a.y+9,20+Math.sin(this.time*10)*2,7,0,0,7);ctx.stroke();ctx.restore()}
@@ -2123,9 +2631,27 @@ draw(){ctx.clearRect(0,0,canvas.width,canvas.height);if(!this.started){ctx.fillS
    ctx.drawImage(this.animation.frame(p),Math.round(a.x-32),Math.round(a.y-50),64,64);continue}
   if(a.isShadow){this.drawShadow(a);continue}
   this.drawEnemy(a)}
- if(this.world.kind==='hub')this.world.cityTop(ctx,this.time,view);this.drawHazards();this.animation.draw(ctx);this.drawImpacts();this.particles.draw(ctx);if(this.world.theme){this.drawDarkness(ctx);this.drawTint(ctx)}this.drawFog(ctx);
+ if(this.world.kind==='hub')this.world.cityTop(ctx,this.time,view);this.drawHazards();this.animation.draw(ctx);this.drawImpacts();this.particles.draw(ctx);if(this.world.theme){this.drawDarkness(ctx);this.drawTint(ctx);this.drawDungeonWeather(ctx)}this.drawFog(ctx);
  for(let f of this.floats){ctx.fillStyle=f.color;ctx.font=`bold ${f.size||16}px monospace`;ctx.lineWidth=3;ctx.strokeStyle='#07131b';ctx.strokeText(f.text,f.x,f.y);ctx.fillText(f.text,f.x,f.y)}
- ctx.restore();if(this.world.kind==='hub')this.drawGateArrows();this.drawMap()}
+ ctx.restore();
+ // indicador de inimigos fora da tela (principalmente à noite)
+ if(this.world.kind!=='dungeon')this.drawOffscreenEnemies(ctx);
+ // tutorial interativo: passo atual no centro da tela
+ if(!this.tutorialDone&&this.tutorial){const st=TUTORIAL_STEPS[this.tutorial.step];if(st){ctx.save();ctx.font='bold 13px monospace';ctx.textAlign='center';ctx.fillStyle='#07131b';ctx.fillText(st.text,canvas.width/2+1,65);ctx.fillStyle='#7fe8ff';ctx.fillText(st.text,canvas.width/2,64);ctx.font='10px monospace';ctx.fillStyle='#6fa8b8';ctx.fillText(`PASSO ${this.tutorial.step+1}/${TUTORIAL_STEPS.length}`,canvas.width/2,80);ctx.restore()}}
+ if(this.world.kind==='hub'||this.world.kind==='city2')this.drawGateArrows();
+ this.drawMap();
+ if(this.qte&&!this.qte.done){const q=this.qte,k=q.t/q.dur,W=canvas.width,H=canvas.height;ctx.save();ctx.fillStyle='#020810cc';ctx.fillRect(W/2-160,H*.32,320,86);ctx.strokeStyle='#3fd6ff';ctx.strokeRect(W/2-160,H*.32,320,86);
+  ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.fillStyle='#7fe8ff';ctx.fillText(q.label,W/2,H*.32+22);
+  const bx=W/2-130,bw=260,by=H*.32+40;ctx.fillStyle='#0a1826';ctx.fillRect(bx,by,bw,16);ctx.fillStyle='#27bfff55';ctx.fillRect(bx+bw*q.zone[0],by,bw*(q.zone[1]-q.zone[0]),16);ctx.fillStyle='#ffe16c';ctx.fillRect(bx+bw*k-3,by-4,6,24);
+  ctx.fillStyle='#e8fbff';ctx.font='bold 11px monospace';ctx.fillText(`${Math.ceil(Math.max(0,q.dur-q.t)*10)/10}s`,W/2,H*.32+74);ctx.restore()}
+ this.drawAimAssist();
+ if(this.cutscene)this.cutscene.draw(ctx);
+ if(this.comboSeq>=3){ctx.save();ctx.font='bold 22px monospace';ctx.textAlign='center';ctx.fillStyle='#7fe8ff';ctx.lineWidth=4;ctx.strokeStyle='#07131b';const tx=canvas.width/2,ty=110;ctx.strokeText(`COMBO x${this.comboSeq}`,tx,ty);ctx.fillText(`COMBO x${this.comboSeq}`,tx,ty);ctx.restore()}
+ if(this.fps&&this.fpsVal!==undefined){ctx.save();ctx.font='bold 11px monospace';ctx.fillStyle='#7fe8ff';ctx.textAlign='left';ctx.fillText(`${this.fpsVal} FPS`,12,canvas.height-10);ctx.restore()}
+ if(this.penalty){ctx.save();ctx.fillStyle='#ffd27a';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.fillText(`ZONA DE PENALDADE · ONDA ${this.penalty.wave}`,canvas.width/2,42);ctx.restore()}
+ if(this.redGateActive){ctx.save();ctx.fillStyle='#ff8a8a';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.fillText(`GATE VERMELHO · ${Math.ceil(this.redTimer)}s`,canvas.width/2,58);ctx.restore()}
+ if(this.classChange){ctx.save();ctx.fillStyle='#ffd27a';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.fillText('DUNGEON ESPECIAL · MUDANÇA DE CLASSE',canvas.width/2,74);ctx.restore()}}
+drawOffscreenEnemies(ctx){const W=canvas.width,H=canvas.height;for(const e of this.enemies){const sx=e.x-this.camera.x,sy=e.y-this.camera.y;if(sx>0&&sx<W&&sy>0&&sy<H)continue;if(e.boss)continue;const a=Math.atan2(sy-H/2,sx-W/2),m=40,ex=clamp(W/2+Math.cos(a)*W,m,W-m),ey=clamp(H/2+Math.sin(a)*H,m+80,H-m-40);ctx.save();ctx.globalAlpha=.6;ctx.fillStyle='#ff4b57';ctx.beginPath();ctx.arc(ex,ey,5,0,7);ctx.fill();ctx.restore()}}
 drawGateArrows(){const p=this.player,W=canvas.width,H=canvas.height;for(const g of this.gates.list){const sx=g.x-this.camera.x,sy=g.y-this.camera.y;if(sx>0&&sx<W&&sy>0&&sy<H)continue;const a=Math.atan2(sy-H/2,sx-W/2),m=60,ex=clamp(W/2+Math.cos(a)*W,m,W-m),ey=clamp(H/2+Math.sin(a)*H,m+90,H-m-90),col=g.red?'#ff4b57':'#3bcfff';
  ctx.save();ctx.translate(ex,ey);ctx.rotate(a);ctx.globalAlpha=.75+.25*Math.sin(this.time*5);ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(14,0);ctx.lineTo(-8,-9);ctx.lineTo(-4,0);ctx.lineTo(-8,9);ctx.closePath();ctx.fill();ctx.restore();ctx.fillStyle=col;ctx.font='bold 10px monospace';ctx.textAlign='center';ctx.fillText(`${g.rank} · ${Math.round(dist(g,p)/10)}m`,ex-Math.cos(a)*24,ey-Math.sin(a)*24+4);ctx.textAlign='left'}}
 drawAtmosphere(c){
@@ -2188,11 +2714,20 @@ drawMap(){let m=mapctx,w=this.world,sx=150/w.w,sy=100/w.h,X=x=>x*sx+5,Y=y=>y*sy+
   m.fillStyle='#e0b84a';m.fillRect(X(HUB.merchant.x)-1,Y(HUB.merchant.y)-1,3,3);m.fillStyle='#5affb0';m.fillRect(X(HUB.healer.x)-1,Y(HUB.healer.y)-1,3,3);
   for(const g of this.gates.list){const blink=g.forming>0||g.life<GATE_RULES.warnAt?Math.sin(this.time*12)>0:true;if(!blink)continue;m.fillStyle=g.red?'#ff5363':'#54dfff';m.shadowColor=m.fillStyle;m.shadowBlur=6;m.fillRect(X(g.x)-2,Y(g.y)-2,5,5);m.shadowBlur=0}
   m.strokeStyle='#a7fcff55';m.strokeRect(X(this.camera.x),Y(this.camera.y),canvas.width*sx,canvas.height*sy)}
+ else if(w.kind==='city2'){// Busan: quadras, orla e o portal de volta a Seoul.
+  m.fillStyle='#2c4438';m.fillRect(X(0),Y(0),w.w*sx,1760*sy);m.fillStyle='#c8a878';m.fillRect(X(0),Y(1760),w.w*sx,140*sy);m.fillStyle='#0e4a68';m.fillRect(X(0),Y(1900),w.w*sx,(w.h-1900)*sy);
+  m.fillStyle='#232a2e';for(let x=0;x<w.w;x+=760)m.fillRect(X(x),Y(0),120*sx,w.h*sy);for(let y=150;y<1760;y+=520)m.fillRect(X(0),Y(y),w.w*sx,110*sy);
+  m.fillStyle='#4a5a68';for(const b of THIS_CITY2.buildings)m.fillRect(X(b.x),Y(b.y),b.w*sx,b.h*sy);
+  m.fillStyle='#3bcfff';m.fillRect(X(THIS_CITY2.portal.x)-2,Y(THIS_CITY2.portal.y)-2,5,5);
+  for(const g of this.gates.list){m.fillStyle=g.red?'#ff5363':'#54dfff';m.fillRect(X(g.x)-2,Y(g.y)-2,4,4)}
+  m.strokeStyle='#a7fcff55';m.strokeRect(X(this.camera.x),Y(this.camera.y),canvas.width*sx,canvas.height*sy)}
  else{// Minimap follows the fog of war: only explored rooms, the corridors leaving them and monsters
   // the player can currently see (lit room, or adjacent rooms with high Perception).
-  const f=this.fog||this.computeFog();m.fillStyle='#32748a';for(const r of w.corridors)if(w.rooms[r.a].seen||w.rooms[r.b].seen)m.fillRect(X(r.gap.x),Y(r.gap.y),Math.max(1,r.gap.w*sx),Math.max(1,r.gap.h*sy));
+  const f=this.fog||this.computeFog();m.fillStyle='#32748a';for(const r of (w.corridors||[]))if(w.rooms[r.a].seen||w.rooms[r.b].seen)m.fillRect(X(r.gap.x),Y(r.gap.y),Math.max(1,r.gap.w*sx),Math.max(1,r.gap.h*sy));
   for(const r of w.rooms.filter(r=>r.seen)){const z='r'+r.id;m.fillStyle=f.lit.has(z)?'#2a7d98':f.near.has(z)?'#1f5f78':'#17465b';m.fillRect(X(r.x),Y(r.y),r.w*sx,r.h*sy)}
   m.fillStyle='#f16978';for(let e of this.enemies)if(this.fogVisible(e))m.fillRect(X(e.x),Y(e.y),e.boss?4:2,e.boss?4:2);m.fillStyle='#b46bff';for(const s of this.soldiers)if(s.state!=='REGENERATE')m.fillRect(X(s.x),Y(s.y),2,2)}
  m.fillStyle='#a7fcff';m.shadowColor='#58faff';m.shadowBlur=7;m.fillRect(X(this.player.x)-2,Y(this.player.y)-2,5,5);m.shadowBlur=0}
 loop(t){let rdt=(t-this.last)/1000||0,dt=Math.min(.04,rdt);this.last=t;if(rdt<1)Mobile.perf(rdt);this.sprites.beginFrame();if(this.started)this.update(dt);this.draw();this.sprites.warm(this.started?(dt>.02?1:3):8);requestAnimationFrame(t=>this.loop(t))}}
-const game=new GameEngine();game.floats=[];$('#accept').onclick=()=>{Mobile.onStart();game.start(null)};if(SaveSystem.load())$('#continue').classList.remove('hidden');$('#continue').onclick=()=>{Mobile.onStart();game.start(SaveSystem.load())};document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>{if(game.started)UIManager.open(b.dataset.panel)});$('#modal').addEventListener('click',e=>{if(e.target===e.currentTarget&&game.panel!=='dead'){UIManager.close();return}let b=e.target.closest('button');if(!b)return;let d=b.dataset,p=game.player;if(d.open){UIManager.open(d.open);return}if(d.set){Mobile.set(d.set,d.val);if(game.panel==='menu')UIManager.open('menu');return}if(d.do==='close'||d.do==='resume')UIManager.close();else if(d.do==='save'){SaveSystem.save(game);UIManager.close();game.message('PROGRESSO SALVO')}else if(d.do==='hub'||d.do==='revive'){p.hp=p.maxhp;p.mp=p.maxmp;game.returnHub()}else if(d.do==='summon'){game.toggleArmy();UIManager.open('army')}else if(d.stat&&p.points>0){p.stats[d.stat]++;p.points--;UIManager.open('status')}else if(d.dismiss!==undefined){game.army.splice(+d.dismiss,1);game.soldiers=[];game.summoned=false;UIManager.open('army')}else if(d.equip!==undefined){let i=+d.equip;if(p.owned.includes(i))p.weapon=i;UIManager.open('inventory')}else if(d.buy!==undefined){let i=+d.buy,w=weapons[i];if(p.owned.includes(i)){p.weapon=i}else if(p.gold>=w.price){p.gold-=w.price;p.owned.push(i);p.weapon=i;game.message('ARMA ADQUIRIDA')}UIManager.open('shop')}else if(d.potion){if(p.gold>=40){p.gold-=40;if(d.potion==='hp')p.hppots++;else p.mppots++}UIManager.open('shop')}else if(d.gate){const gate=game.selectedGate;if(gate)game.gates.remove(gate);game.selectedGate=null;game.enter(d.gate,d.red==='1',d.theme||null)}if(game.started)SaveSystem.save(game)});
+const game=new GameEngine();game.floats=[];game.contracts=[];game.bestiary={};game.hunter={points:0,rank:'E',evalReady:false};game.story={};game.daily={date:new Date().toLocaleDateString('en-CA'),kills:0,dashes:0,distance:0,pushups:0,situps:0,deaths:0,done:false,penalty:false};game.rollContracts();
+ $('#accept').onclick=()=>{Mobile.onStart();game.start(null)};if(SaveSystem.load())$('#continue').classList.remove('hidden');$('#continue').onclick=()=>{Mobile.onStart();game.start(SaveSystem.load())};document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>{if(game.started)UIManager.open(b.dataset.panel)});$('#modal').addEventListener('click',e=>{if(e.target===e.currentTarget&&game.panel!=='dead'){UIManager.close();return}let b=e.target.closest('button');if(!b)return;let d=b.dataset,p=game.player;if(d.open){UIManager.open(d.open);return}if(d.set){Mobile.set(d.set,d.val);if(game.panel==='menu')UIManager.open('menu');return}if(d.do==='close'||d.do==='resume')UIManager.close();else if(d.do==='save'){SaveSystem.save(game);UIManager.close();game.message('PROGRESSO SALVO')}else if(d.do==='hub'||d.do==='revive'){p.hp=p.maxhp;p.mp=p.maxmp;game.returnHub()}else if(d.do==='summon'){game.toggleArmy();UIManager.open('army')}else if(d.do==='order'){game.cycleArmyOrder();UIManager.open('army')}else if(d.do==='talents'){UIManager.open('talents')}else if(d.do==='export'){UIManager.open('export')}else if(d.do==='import'){UIManager.open('import')}else if(d.do==='importRun'){const ta=$('#importCode');if(ta&&SaveSystem.import(ta.value)){game.start(SaveSystem.load());UIManager.close();game.message('SAVE IMPORTADO')}else game.message('CÓDIGO INVÁLIDO')}
+ else if(d.talent){game.spendTalent(d.talent);UIManager.open('talents')}else if(d.contract!==undefined){game.acceptContract(+d.contract);UIManager.open('contracts')}else if(d.itemEquip!==undefined){game.equipItem(d.itemEquip);UIManager.open('inventory')}else if(d.stat&&p.points>0){p.stats[d.stat]++;p.points--;UIManager.open('status')}else if(d.dismiss!==undefined){game.dismissShadow(+d.dismiss);UIManager.open('army')}else if(d.equip!==undefined){let i=+d.equip;if(p.owned.includes(i))p.weapon=i;UIManager.open('inventory')}else if(d.buy!==undefined){let i=+d.buy,w=weapons[i];if(p.owned.includes(i)){p.weapon=i}else if(p.gold>=w.price){p.gold-=w.price;p.owned.push(i);p.weapon=i;game.message('ARMA ADQUIRIDA')}UIManager.open('shop')}else if(d.potion){if(p.gold>=40){p.gold-=40;if(d.potion==='hp')p.hppots++;else p.mppots++}UIManager.open('shop')}else if(d.gate){const gate=game.selectedGate;if(gate)game.gates.remove(gate);game.selectedGate=null;game.enter(d.gate,d.red==='1',d.theme||null)}if(game.started)SaveSystem.save(game)});
