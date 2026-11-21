@@ -274,7 +274,7 @@ run(`game.player.hp=1;game.player.burnT=0;game.terrainEffects(game.player,1/60)`
 assert.equal(run('UIManager.open&&game.player.hp'), 0, 'lava can kill');
 run('UIManager.close();game.player.hp=game.player.maxhp');
 // Ice keeps momentum (the hunter keeps sliding after releasing the keys).
-run(`game.enter('B',false,'glacial');globalThis.__z=game.world.zones.find(z=>z.kind==='ice');(()=>{const p=game.player;game.enemies=[];game.world.solids=[];p.x=__z.x;p.y=__z.y;p.ivx=200;p.ivy=0;p.dashTime=0;game.input.keys={};game.input.touchMode=false;game.input.stick={x:0,y:0,mag:0};globalThis.__x0=p.x;game.update(1/30)})()`);
+run(`game.enter('B',false,'glacial');globalThis.__z=game.world.zones.find(z=>z.kind==='ice');(()=>{const p=game.player;game.enemies=[];game.world.solids=[];game.hitStop=0;p.x=__z.x;p.y=__z.y;p.ivx=200;p.ivy=0;p.dashTime=0;game.input.keys={};game.input.touchMode=false;game.input.stick={x:0,y:0,mag:0};globalThis.__x0=p.x;game.update(1/30)})()`);
 assert.ok(run('game.player.x') > run('__x0') + 2, 'ice keeps the hunter sliding');
 // Gates carry a theme that the gate panel shows and passes to enter().
 run('game.returnHub();game.gates.list=[]');

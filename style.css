@@ -142,7 +142,7 @@ body{position:fixed;inset:0;-webkit-user-select:none;user-select:none;-webkit-to
 .t-loc{max-width:32vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 10px;font:10px 'Share Tech Mono',monospace;letter-spacing:1px;color:#bff6ff;background:#061a28cc;border:1px solid #2d6f86}
 .t-icon{width:36px;height:36px;padding:0;font:16px/34px 'Share Tech Mono',monospace;color:#9befff;background:#061a28dd;border:1px solid #3a8ea4;box-shadow:0 0 8px #00a8d433;touch-action:manipulation}
 .t-icon svg{display:block;margin:auto}.t-icon:active,.t-icon.down{background:#0f4a63;color:#fff}
-#actions{position:absolute;right:calc(10px + env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));width:calc(246px*var(--s));height:calc(212px*var(--s));pointer-events:none;opacity:var(--ctl-alpha,.9)}
+#actions{position:absolute;right:calc(10px + env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));width:calc(262px*var(--s));height:calc(252px*var(--s));pointer-events:none;opacity:var(--ctl-alpha,.9)}
 .t-btn{--z:52;--r:0;--b:0;position:absolute;right:calc(var(--r)*1px*var(--s));bottom:calc(var(--b)*1px*var(--s));width:calc(var(--z)*1px*var(--s));height:calc(var(--z)*1px*var(--s));padding:0;border-radius:50%;pointer-events:auto;touch-action:none;color:#bff6ff;
  background:radial-gradient(circle at 50% 35%,#15506aee,#071726ee 72%);border:2px solid #3b92a7;box-shadow:0 0 12px #00a8d44d,inset 0 0 12px #00c8ff2a;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:transform .06s,filter .15s}
 .t-btn .ico{display:block;width:58%;height:58%;font:bold calc(22px*var(--s))/1 'Share Tech Mono',monospace;color:#bff6ff;text-shadow:0 0 8px #33d6ff}
@@ -159,6 +159,11 @@ body{position:fixed;inset:0;-webkit-user-select:none;user-select:none;-webkit-to
 .t-btn.summon{--z:48;--r:121;--b:161;border-color:#9b5bff;background:radial-gradient(circle at 50% 35%,#3a1a66ee,#120726ee 72%);box-shadow:0 0 12px #8a3cff55}
 .t-btn.summon.active{border-color:#e0b8ff;box-shadow:0 0 18px #b06bffcc,inset 0 0 14px #b06bff66;animation:summonPulse 1.6s ease-in-out infinite}
 .t-btn.pot{--z:42}.t-btn.hp{--r:193;--b:89;border-color:#e2536a;background:radial-gradient(circle at 50% 35%,#5a1a2aee,#1a0710ee 72%)}.t-btn.mp{--r:193;--b:139;border-color:#36b6ef;background:radial-gradient(circle at 50% 35%,#103e5aee,#06172aee 72%)}
+/* ordem das sombras + atalho do Yoo Jin-ho */
+.t-btn.order{--z:42;--r:8;--b:182;border-color:#8fd8a0;background:radial-gradient(circle at 50% 35%,#1a4a30ee,#071a10ee 72%)}
+.t-btn.order em{font-size:calc(7px*var(--s))}
+.t-btn.jinho{--z:42;--r:58;--b:196;border-color:#ffd27a;background:radial-gradient(circle at 50% 35%,#4a3a10ee,#1a1206ee 72%)}
+.t-btn.jinho em{display:none}
 @keyframes summonPulse{50%{box-shadow:0 0 26px #c78bffee,inset 0 0 18px #b06bff88}}
 /* left-handed: analog on the right, actions mirrored on the left (labels stay readable) */
 body.lefty #stickZone{left:auto;right:0}
@@ -247,3 +252,47 @@ body.touch .army-drain em{display:none}
 .gate-theme b{display:block;color:var(--th,#3bcfff);letter-spacing:.06em;margin:2px 0 4px}
 .gate-theme p{margin:0;font-size:12px;line-height:1.4;opacity:.85}
 .gate-theme em{display:block;margin-top:5px;font-style:normal;font-size:11px;color:#ffb35a;letter-spacing:.05em}
+
+/* ---------------------------------------------------------------------------------------------
+   Expansão: missão diária, acessibilidade (texto maior, daltonismo, ultra leve) e ordens. */
+.daily-goals{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:10px;padding-top:8px;border-top:1px solid #1b3948;font:9px 'Share Tech Mono',monospace;letter-spacing:.4px;color:#8fd8e8}
+.daily-goals span{white-space:nowrap}
+.daily-goals span.ok{color:#8affc8;text-shadow:0 0 8px #35d8ff66}
+.daily-goals span:not(.ok){opacity:.85}
+
+/* texto maior (acessibilidade) */
+body.bigtext{font-size:118%}
+body.bigtext .identity{width:340px}
+body.bigtext .quest{width:260px}
+body.bigtext .hunter{font-size:19px}
+body.bigtext .class{font-size:11px}
+body.bigtext .meter{font-size:10px}
+body.bigtext .quest-content strong{font-size:16px}
+body.bigtext .quest-content p{font-size:13px}
+body.bigtext #interact{font-size:15px}
+body.bigtext #notice{font-size:20px}
+body.bigtext .modal-box p,body.bigtext .muted{font-size:14px}
+body.bigtext .modal-box button.action{font-size:13px;padding:10px 14px}
+body.bigtext .stat-row,body.bigtext .item-row{font-size:14px}
+body.bigtext .hot small{font-size:9px}
+body.bigtext nav button{font-size:11px}
+body.bigtext .daily-goals{font-size:10px}
+
+/* filtro para daltônicos: o canvas inteiro passa por uma matriz que separa vermelho/verde */
+body.colorblind #canvas{filter:url(#cbFilter) saturate(1.15)}
+body.colorblind #interact{border-color:#ffb24a;color:#fff}
+body.colorblind #bossbar{color:#ffb24a}
+
+/* perfil ultra leve: sem brilhos, sombras ou vinhetas (celulares fracos) */
+body.ultralight .vignette,body.ultralight .vignette:after{display:none}
+body.ultralight .panel,body.ultralight .hot,body.ultralight .hotbar,body.ultralight .modal-box{box-shadow:none;text-shadow:none}
+body.ultralight .hot b,body.ultralight .hot kbd,body.ultralight .start-mark,body.ultralight .start-kicker{text-shadow:none}
+body.ultralight #interact{animation:none;box-shadow:none}
+body.ultralight #notice{box-shadow:none}
+body.ultralight .modal-title{text-shadow:none}
+body.ultralight .start-window{box-shadow:none}
+body.ultralight .t-btn{box-shadow:none}
+body.ultralight .army-drain{animation:none}
+body.ultralight .meter.mp.drain i{animation:none}
+body.ultralight .t-btn.summon.active{animation:none}
+body.ultralight #start:before{animation:none}

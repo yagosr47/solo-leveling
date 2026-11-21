@@ -17,6 +17,7 @@
 <body>
 <div id="game">
  <canvas id="canvas"></canvas>
+ <svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="cbFilter"><feColorMatrix type="matrix" values="0.35 0.65 0 0 0  0.1 0.8 0.1 0 0  0.15 0.25 0.6 0 0  0 0 0 1 0"/></filter></svg>
  <div class="vignette"></div>
  <!-- Touch controls (phones/tablets): floating analog stick, action cluster and quick buttons.
       Rendered under the HUD so HUD panels stay tappable; hidden on desktop. -->
@@ -35,6 +36,8 @@
    <button class="t-btn sk s2" data-t="skill2" data-hot="1" type="button" aria-label="Mutilação"><b class="ico"></b><em>25</em><i class="cd"></i></button>
    <button class="t-btn sk s3" data-t="skill3" data-hot="2" type="button" aria-label="Autoridade"><b class="ico"></b><em>35</em><i class="cd"></i></button>
    <button class="t-btn summon" data-t="summon" data-hot="3" type="button" aria-label="Invocar sombras"><b class="ico"></b><em id="tArmy">0/2</em></button>
+   <button class="t-btn order" data-t="order" type="button" aria-label="Ordem das sombras"><b class="ico">⚑</b><small>ORDEM</small><em>ATTACK</em></button>
+   <button class="t-btn jinho" data-t="jinho" type="button" aria-label="Chamar Yoo Jin-ho"><b class="ico">⚔</b><small>JIN-HO</small><em>G</em></button>
    <button class="t-btn pot hp" data-t="hp" data-hot="4" type="button" aria-label="Poção de vida"><b class="ico"></b><em id="tHp">3</em></button>
    <button class="t-btn pot mp" data-t="mp" data-hot="5" type="button" aria-label="Poção de mana"><b class="ico"></b><em id="tMp">3</em></button>
   </div>
@@ -71,7 +74,8 @@
   <div class="side-stack">
    <aside class="quest panel" data-hud="quest">
     <div class="quest-title"><span>◈</span> ACTIVE QUEST <button class="hud-toggle inline" data-toggle="quest" type="button" aria-label="Minimizar missão" title="Minimizar">−</button></div>
-    <div class="quest-content panel-body"><small>DAILY QUEST</small><strong>Preparação para o combate</strong><p>Derrote monstros em uma dungeon.</p><div class="quest-progress"><span>MONSTROS DERROTADOS</span><b id="questcount">0 / 15</b></div><div class="progress"><i id="questfill"></i></div><div class="reward">RECOMPENSA <span>+3 PONTOS DE ATRIBUTO</span></div></div>
+    <div class="quest-content panel-body"><small>DAILY QUEST</small><strong>Preparação para o combate</strong><p>Derrote monstros em uma dungeon.</p><div class="quest-progress"><span>MONSTROS DERROTADOS</span><b id="questcount">0 / 15</b></div><div class="progress"><i id="questfill"></i></div><div class="reward">RECOMPENSA <span>+3 PONTOS DE ATRIBUTO</span></div>
+    <div id="dailyGoals" class="daily-goals" title="Missão diária do Sistema: 100 flexões (abates), 100 abdominais (esquivas) e 10 km de corrida"></div></div>
    </aside>
    <aside class="gates panel" data-hud="gates">
     <div class="quest-title"><span>⚠</span> GATES ATIVOS <b id="gatecount" class="count">0</b><button class="hud-toggle inline" data-toggle="gates" type="button" aria-label="Minimizar gates" title="Minimizar">−</button></div>
@@ -79,11 +83,11 @@
    </aside>
   </div>
   <div class="bottom">
-   <div class="help" data-hud="help"><button class="hud-toggle inline" data-toggle="help" type="button" aria-label="Minimizar ajuda" title="Minimizar">−</button><span class="help-body"> <span>W A S D</span> MOVER <i></i> <span>MOUSE</span> MIRAR <i></i> <span>ESPAÇO</span> ATACAR <i></i> <span>SHIFT</span> ESQUIVAR <i></i> <span>H</span> HUD</span><span class="help-mini">CONTROLES</span></div>
+   <div class="help" data-hud="help"><button class="hud-toggle inline" data-toggle="help" type="button" aria-label="Minimizar ajuda" title="Minimizar">−</button><span class="help-body"> <span>W A S D</span> MOVER <i></i> <span>MOUSE</span> MIRAR <i></i> <span>ESPAÇO</span> ATACAR <i></i> <span>SHIFT</span> ESQUIVAR <i></i> <span>E</span> INTERAGIR <i></i> <span>R</span> SOMBRAS <i></i> <span>G</span> JIN-HO <i></i> <span>H</span> HUD</span><span class="help-mini">CONTROLES</span></div>
    <div class="hotbar-wrap" data-hud="hotbar">
     <button class="hud-toggle tab" data-toggle="hotbar" type="button" aria-label="Minimizar barra de habilidades" title="Minimizar">−</button>
     <div class="hotbar panel-body"><div class="hot"><kbd>1</kbd><b><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M7 32 26 9l7-3-3 7L11 34Z" fill="#b3faff" stroke="#52daff" stroke-width="2"/><path d="m8 29 5 5M7 35l5-5" stroke="#91d6f3" stroke-width="2"/><path d="M20 7 14 4M31 19l5 2" stroke="#4bbfe3"/></svg></b><small>CORTE VITAL</small></div><div class="hot"><kbd>2</kbd><b><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M7 29 26 8M12 34 31 13M7 18 20 5M21 34 35 18" stroke="#76eaff" stroke-width="3"/><path d="M5 30 24 9M10 35 29 14" stroke="#e5ffff" stroke-width="1"/></svg></b><small>MUTILAÇÃO</small></div><div class="hot"><kbd>3</kbd><b><svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="12" fill="none" stroke="#62d8fa" stroke-width="2"/><circle cx="20" cy="20" r="7" fill="#2482ae" stroke="#d6fbff"/><path d="M20 2v8M20 30v8M2 20h8M30 20h8" stroke="#a8f7ff" stroke-width="2"/></svg></b><small>AUTORIDADE</small></div><div class="hot purple"><kbd>R</kbd><b><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M8 32V20l5-8 3 3 4-10 4 10 3-3 5 8v12Z" fill="#3c2062" stroke="#c879ff" stroke-width="2"/><path d="M13 21h4M23 21h4" stroke="#f2d2ff" stroke-width="2"/><path d="M11 35h18" stroke="#a855f7" stroke-width="2"/></svg></b><small id="armycount" title="Sombras no exército / capacidade máxima">SOMBRAS 0/2</small></div><div class="separator"></div><div class="hot red"><kbd>Q</kbd><b><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M15 6h10v6l4 5v15H11V17l4-5Z" fill="#942a49" stroke="#ffc0c9" stroke-width="2"/><path d="M14 21h12v8H14Z" fill="#ed5267"/><path d="M17 6h6" stroke="#ffe4d4" stroke-width="2"/></svg></b><small id="hppots">HP ×3</small></div><div class="hot blue"><kbd>F</kbd><b><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M15 6h10v6l4 5v15H11V17l4-5Z" fill="#176b9b" stroke="#a7edff" stroke-width="2"/><path d="M14 21h12v8H14Z" fill="#36c9f0"/><path d="M17 6h6" stroke="#e6fdff" stroke-width="2"/></svg></b><small id="mppots">MP ×3</small></div></div>
-    <nav class="panel-body"><button data-panel="status"><span>C</span> STATUS</button><button data-panel="inventory"><span>I</span> INVENTÁRIO</button><button data-panel="army"><span>V</span> SOMBRAS</button><button data-panel="shop"><span>B</span> LOJA</button><button data-panel="bestiary"><span>N</span> BESTIÁRIO</button><button data-panel="pause"><span>ESC</span> MENU</button></nav>
+    <nav class="panel-body"><button data-panel="status"><span>C</span> STATUS</button><button data-panel="talents"><span>T</span> TALENTOS</button><button data-panel="inventory"><span>I</span> INVENTÁRIO</button><button data-panel="army"><span>V</span> SOMBRAS</button><button data-panel="contracts"><span>P</span> CONTRATOS</button><button data-panel="shop"><span>B</span> LOJA</button><button data-panel="bestiary"><span>N</span> BESTIÁRIO</button><button data-panel="pause"><span>ESC</span> MENU</button></nav>
    </div>
   </div>
   <div class="zone-label" data-hud="zone"><button class="hud-toggle inline" data-toggle="zone" type="button" aria-label="Minimizar zona" title="Minimizar">−</button><span>✦</span><div><small>VOCÊ ESTÁ EM</small><strong id="zoneLabel">ASSOCIAÇÃO DOS CAÇADORES</strong></div></div>
