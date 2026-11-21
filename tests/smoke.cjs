@@ -280,4 +280,23 @@ assert.ok(run('game.player.x') > run('__x0') + 2, 'ice keeps the hunter sliding'
 run('game.returnHub();game.gates.list=[]');
 assert.equal(run(`(()=>{const g=game.gates.spawn(game,{x:HUB.spawn.x+40,y:HUB.spawn.y,instant:true,rank:'C',theme:'sunken'});return g&&g.theme})()`), 'sunken', 'gate keeps its theme');
 assert.equal(run(`(()=>{const g=game.gates.spawn(game,{x:HUB.spawn.x-40,y:HUB.spawn.y,instant:true,rank:'S'});return DUNGEON_THEMES.S.some(t=>t.id===g.theme)})()`), true, 'gates roll a theme of their rank');
-console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army, army mana, mobile touch controls and 18 dungeon themes.');
+// Room framing: the current room is centred in the free screen area and never under the HUD.
+run(`game.enter('E',false,'cartenon');game.enemies=[];(()=>{const r=game.world.rooms[3];game.player.x=r.cx;game.player.y=r.cy})();game.draw()`);
+assert.ok(run('!!game.viewLayout'), 'dungeon uses the room layout');
+assert.ok(Math.abs(run('game.camera.x+game.viewLayout.cx') - run('game.world.rooms[3].cx')) < 1, 'room centred horizontally (even at the map edge)');
+assert.ok(Math.abs(run('game.camera.y+game.viewLayout.cy') - run('game.world.rooms[3].cy')) < 1, 'room centred vertically');
+assert.equal(run('Math.round(innerWidth/2/game.renderScale)'), run('Math.round(game.viewLayout.cx)'), 'room centre is the screen centre');
+// With a bottom skill bar and side touch buttons, the zoom shrinks so the room clears all of them.
+run(`globalThis.__obs=[{x:340,y:560,w:600,h:240},{x:1000,y:300,w:280,h:500},{x:0,y:0,w:340,h:160},{x:560,y:0,w:160,h:30}];game.hudObstacles=()=>__obs;game.resize();game._camSnap=true;game.draw()`);
+assert.equal(run(`(()=>{const L=game.viewLayout,s=game.renderScale,r=game.world.rooms[3],x0=(r.x-30-game.camera.x)*s,x1=(r.x+r.w+30-game.camera.x)*s,y0=(r.y-34-game.camera.y)*s,y1=(r.y+r.h+34-game.camera.y)*s;return __obs.every(o=>x1<=o.x||x0>=o.x+o.w||y1<=o.y||y0>=o.y+o.h)&&x0>=0&&x1<=innerWidth&&y0>=0&&y1<=innerHeight})()`), true, 'room (with walls) never overlaps the HUD');
+assert.ok(run('game.viewLayout.cy*game.renderScale') < 400, 'room centred in the band above the skill bar');
+assert.ok(run('game.renderScale') <= run('Mobile.scale(innerWidth,innerHeight)'), 'never zooms beyond the normal zoom');
+// Moving to another room glides the camera there; corridors interpolate between both rooms.
+run(`(()=>{const w=game.world,c=w.corridors.find(c=>c.a===3||c.b===3),o=c.a===3?c.b:c.a;globalThis.__c=c;globalThis.__o=o;game.player.x=c.x+c.w/2;game.player.y=c.y+c.h/2})()`);
+assert.equal(run(`(()=>{const f=game.cameraFocus(),A=game.world.rooms[__c.a],B=game.world.rooms[__c.b];return f.x>=Math.min(A.cx,B.cx)-1&&f.x<=Math.max(A.cx,B.cx)+1&&f.y>=Math.min(A.cy,B.cy)-1&&f.y<=Math.max(A.cy,B.cy)+1})()`), true, 'corridor focus lies between the linked rooms');
+run(`(()=>{const r=game.world.rooms[__o];game.player.x=r.cx;game.player.y=r.cy;for(let i=0;i<90;i++){game.time+=1/60;game.draw()}})()`);
+assert.ok(Math.abs(run('game.camera.x+game.viewLayout.cx') - run('game.world.rooms[__o].cx')) < 2, 'camera glides to the new room');
+run('delete game.hudObstacles;game.returnHub();game.draw()');
+assert.equal(run('game.viewLayout'), null, 'city keeps the follow camera');
+assert.ok(run('game.camera.x') >= 0, 'city camera stays clamped to the map');
+console.log('Smoke tests passed: dungeon, combat, animation, facing, dash opacity, monster attributes, city gates, HUD, save, traffic, NPCs, VFX, safe spawns, world-anchored water, fog of war, room aggro, shadow army, army mana, mobile touch controls, 18 dungeon themes and centred room framing.');

@@ -1842,7 +1842,52 @@ const Mobile={on:false,light:false,lastTouch:-1e9,stickId:null,cache:{},
 };
 const weapons=[{name:'Adaga de Ferro',damage:5,price:0},{name:'Presa de Kasaka',damage:18,price:300},{name:'Adaga do Assassino',damage:35,price:700},{name:'Adaga do Rei Demônio',damage:65,price:1500}];
 class GameEngine{constructor(){this.sprites=new ProceduralSprites();const portrait=$('#portraitCanvas').getContext('2d');portrait.imageSmoothingEnabled=false;portrait.drawImage(this.sprites.playerFrames['2:idle'],14,4,36,45,0,0,80,100);this.sound=new SoundFX();this.particles=new ParticleSystem();this.input=new InputHandler();this.gates=new GateSystem();this.projectiles=[];this.hazards=[];this.impacts=[];this.shakeT=0;this.shakeMag=0;this.started=false;this.time=0;this.last=0;this.hudClock=0;this.camera={x:0,y:0};this.renderScale=1;Mobile.init();this.resize();window.addEventListener('resize',()=>this.resize());HudManager.init();requestAnimationFrame(t=>this.loop(t))}
-resize(){const W=innerWidth,H=innerHeight,s=this.renderScale=Mobile.scale(W,H);canvas.width=Math.round(W/s);canvas.height=Math.round(H/s);ctx.imageSmoothingEnabled=false}
+resize(){const W=innerWidth,H=innerHeight,base=Mobile.scale(W,H);let s=base;this.viewLayout=null;
+ if(this.world&&this.world.kind==='dungeon'){const L=this.viewLayout=this.roomLayout(W,H,base);s=L.s}
+ this.renderScale=s;canvas.width=Math.round(W/s);canvas.height=Math.round(H/s);ctx.imageSmoothingEnabled=false;this._layoutSig=this.hudSignature()}
+// ---- Dungeon room framing ------------------------------------------------------------------
+// Inside a dungeon the current room is always shown whole and centred in the free part of the
+// screen. Visible HUD panels, the skill bar and the touch controls are measured as obstacles; the
+// zoom is the largest one (never above the normal zoom) that fits the room plus its walls between
+// them, so the hotbar / buttons sit over the dark surroundings, never over the room.
+hudObstacles(){const out=[];if(typeof document==='undefined'||!document.querySelectorAll)return out;
+ const sel='#hud:not(.hidden) [data-hud],#hud:not(.hidden) #hudToggle,#touch:not(.hidden) .t-top,#touch:not(.hidden) .t-btn,#touch:not(.hidden) #stickBase';
+ let list=[];try{list=document.querySelectorAll(sel)}catch(e){return out}
+ for(const el of list){if(!el||!el.getBoundingClientRect)continue;const r=el.getBoundingClientRect();if(!(r.width>2&&r.height>2))continue;
+  if(typeof getComputedStyle==='function'){const cs=getComputedStyle(el);if(cs.visibility==='hidden'||cs.display==='none'||+cs.opacity===0)continue}
+  out.push({x:r.left,y:r.top,w:r.width,h:r.height})}
+ return out}
+hudSignature(){return this.hudObstacles().map(r=>`${r.x|0},${r.y|0},${r.w|0},${r.h|0}`).join(';')+'|'+innerWidth+'x'+innerHeight}
+roomLayout(W,H,base){const obs=this.hudObstacles(),pad=8,FW=420+2*30,FH=280+2*34,cx=W/2;
+ // free vertical band in the central column: below the top HUD, above the bottom HUD
+ let top=0,bottom=H;for(const o of obs){if(o.x>cx+60||o.x+o.w<cx-60)continue;const mid=o.y+o.h/2;if(mid<H/2)top=Math.max(top,o.y+o.h+pad);else bottom=Math.min(bottom,o.y-pad)}
+ if(bottom-top<H*.4){top=0;bottom=H}
+ const cy=(top+bottom)/2,fits=k=>{const hw=FW*k/2,hh=FH*k/2,x0=cx-hw,x1=cx+hw,y0=cy-hh,y1=cy+hh;if(y0<top-1||y1>bottom+1||x0<0||x1>W)return false;
+  for(const o of obs)if(x1>o.x-pad&&x0<o.x+o.w+pad&&y1>o.y-pad&&y0<o.y+o.h+pad)return false;return true};
+ let s=base;if(!fits(s)){let lo=.3,hi=s;for(let i=0;i<16;i++){const m=(lo+hi)/2;if(fits(m))lo=m;else hi=m}s=lo}
+ return {s,cx:cx/s,cy:cy/s,top,bottom,obs:obs.length}}
+// World point the camera frames: the centre of the current room, or (in a corridor) a point that
+// slides between the two linked rooms following the hunter's progress along the corridor.
+cameraFocus(){const w=this.world,p=this.player,z=this.zoneAt(p.x,p.y);
+ if(z&&z[0]==='r'){const r=w.rooms[+z.slice(1)];this._lastRoom=r;return {x:r.cx,y:r.cy}}
+ if(z&&z[0]==='c'){const c=w.corridors[+z.slice(1)],A=w.rooms[c.a],B=w.rooms[c.b],hor=Math.abs(A.cy-B.cy)<Math.abs(A.cx-B.cx);
+  const t=clamp(hor?(p.x-A.cx)/(B.cx-A.cx):(p.y-A.cy)/(B.cy-A.cy),0,1),e=t*t*(3-2*t);return {x:A.cx+(B.cx-A.cx)*e,y:A.cy+(B.cy-A.cy)*e}}
+ const r=this._lastRoom||w.rooms[3];return {x:r.cx,y:r.cy}}
+updateCamera(){const p=this.player,w=this.world,now=this.time,dt=Math.min(.1,Math.max(0,now-(this._camT??now)));this._camT=now;
+ if(w.kind!=='dungeon'||!this.viewLayout){this.camera.x=clamp(p.x-canvas.width/2,0,Math.max(0,w.w-canvas.width));this.camera.y=clamp(p.y-canvas.height/2,0,Math.max(0,w.h-canvas.height));this._camSnap=true;return}
+ const L=this.viewLayout,f=this.cameraFocus(),tx=f.x-L.cx,ty=f.y-L.cy;
+ if(this._camSnap||!isFinite(this.camera.x)){this.camera.x=tx;this.camera.y=ty;this._camSnap=false;return}
+ const k=1-Math.exp(-dt*9);this.camera.x+=(tx-this.camera.x)*k;this.camera.y+=(ty-this.camera.y)*k}
+// The camera may frame rooms near the map border, so the area beyond the map is filled with the
+// theme's deep background colour and the map edge fades into it (no hard seam).
+backdropColor(){const th=this.world.theme;return th?shadeHex(th.pal.bg,th.dark>0?-.55:-.35):'#05080c'}
+drawDungeonBackdrop(){ctx.fillStyle=this.backdropColor();ctx.fillRect(0,0,canvas.width,canvas.height)}
+drawWorldEdges(c,v){const w=this.world,col=this.backdropColor(),F=90;if(v.x>F&&v.y>F&&v.x+v.w<w.w-F&&v.y+v.h<w.h-F)return;c.save();
+ const fade=(x0,y0,x1,y1,rx,ry,rw,rh)=>{const g=c.createLinearGradient(x0,y0,x1,y1);g.addColorStop(0,col);g.addColorStop(1,col+'00');c.fillStyle=g;c.fillRect(rx,ry,rw,rh)};
+ if(v.x<F)fade(0,0,F,0,0,0,F,w.h);if(v.x+v.w>w.w-F)fade(w.w,0,w.w-F,0,w.w-F,0,F,w.h);if(v.y<F)fade(0,0,0,F,0,0,w.w,F);if(v.y+v.h>w.h-F)fade(0,w.h,0,w.h-F,0,w.h-F,w.w,F);
+ c.restore()}
+// Re-measure the HUD a few times per second; resize only when the layout really changed.
+checkViewLayout(dt){if(this.world.kind!=='dungeon')return;this._layoutT=(this._layoutT||0)-dt;if(this._layoutT>0)return;this._layoutT=.3;const sig=this.hudSignature();if(sig!==this._layoutSig)this.resize()}
 start(saved){this.player=new Player(saved?.player);this.animation=new PlayerAnimation(this.sprites);if(this.player.hp<=0){this.player.hp=this.player.maxhp;this.player.mp=this.player.maxmp}this.army=saved?.army||[];this.quest=saved?.quest||0;this.questDate=new Date().toLocaleDateString('en-CA');if(saved?.questDate!==this.questDate)this.quest=0;this.questDone=saved?.questDate===this.questDate&&(saved?.questDone||false);this.unlocked=saved?.unlocked||0;this.world=new WorldMap();this.gates=new GateSystem();this.projectiles=[];this.hazards=[];this.impacts=[];this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.pendingStrikes=[];this.panel=null;this.started=true;this.bossDefeated=false;this.chest=false;this.redGate=false;$('#start').classList.add('hidden');$('#hud').classList.remove('hidden');this.message('BEM-VINDO, JOGADOR');this.sound.play('alert');Mobile.apply();this.updateHUD()}
 message(text){$('#notice').textContent=text;clearTimeout(this.noticeTimer);this.noticeTimer=setTimeout(()=>$('#notice').textContent='',3200)}
 shake(mag,time=.25){this.shakeMag=Math.max(this.shakeMag,mag);this.shakeT=Math.max(this.shakeT,time)}
@@ -1854,7 +1899,7 @@ terrainEffects(p,dt){const z=this.world.terrainAt?this.world.terrainAt(p.x,p.y):
  if(p.burnT<=0){p.burnT=burn?.5:.7;const dmg=Math.max(1,Math.round((burn?3+p.level*.6:2+p.level*.35)*(1-Math.min(.6,p.stats.VIT*.008))));p.hp-=dmg;p.hurtTime=.12;
   this.floats.push({x:p.x+rand(-8,8),y:p.y-46,text:'-'+dmg,life:.6,color:burn?'#ff9a4a':'#c6ff6a',size:13});this.particles.burst(p.x,p.y,burn?'#ff7a2a':z.color||'#8aff4a',6,burn?{kind:'ember',speed:60,lift:50}:{speed:40,lift:30});
   if(!burn)p.slow=Math.max(p.slow||0,.6);if(p.hp<=0){p.hp=0;UIManager.open('dead')}}}
-enter(rank,red=false,themeId=null){UIManager.close();this.world=DungeonGenerator.create(rank,themeId);this.hazardSeen=new Set();this.animation=new PlayerAnimation(this.sprites);this.player.x=300;this.player.y=600;this.bossDefeated=false;this.chest=false;this.redGate=!!red;this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.corpses=[];this.soldiers=[];this.summoned=false;let idx=Math.max(0,RANKS.indexOf(rank)),th=this.world.theme,types=th&&th.mon?th.mon.filter(t=>MONSTER_TYPES[t]):GATE_MONSTERS(idx);if(!types.length)types=GATE_MONSTERS(idx);this.enemies=[];
+enter(rank,red=false,themeId=null){UIManager.close();this.world=DungeonGenerator.create(rank,themeId);this.hazardSeen=new Set();this._lastRoom=null;this._camSnap=true;this.resize();this.animation=new PlayerAnimation(this.sprites);this.player.x=300;this.player.y=600;this.bossDefeated=false;this.chest=false;this.redGate=!!red;this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.corpses=[];this.soldiers=[];this.summoned=false;let idx=Math.max(0,RANKS.indexOf(rank)),th=this.world.theme,types=th&&th.mon?th.mon.filter(t=>MONSTER_TYPES[t]):GATE_MONSTERS(idx);if(!types.length)types=GATE_MONSTERS(idx);this.enemies=[];
  // Every monster is placed only on a validated walkable spot (inside its room, clear of walls and of
  // the other monsters); if random tries fail, a ring search from the room centre takes over.
  const bdef=BOSS_TYPES[rank]||BOSS_TYPES.E,bossRoom=this.world.rooms[5],bsp=this.findFreeSpot(bossRoom.cx,bossRoom.cy,bdef.radius,0,200)||{x:bossRoom.cx,y:bossRoom.cy};
@@ -1924,7 +1969,7 @@ shadowStrike(s,A){const a=A.a,dmg=s.damageOf(a),col='#b46bff';s.swing=.25;A.phas
 }
 spawnSoldiers(){const p=this.player,taken=[];return this.army.map((d,i)=>{const r=Math.min(26,shadowDef(normalizeShadow(d,p.level)).radius||16);
  const sp=this.findFreeSpot(p.x,p.y,r,40,260,{los:true,avoid:[p,...taken],sep:r+14,angle:(p.angle||0)+Math.PI})||this.findFreeSpot(p.x,p.y,12,0,320,{avoid:taken,sep:20})||{x:p.x,y:p.y};taken.push(sp);return new ShadowSoldier(d,i,sp)})}
-returnHub(){this.world=new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.player.x=HUB.spawn.x;this.player.y=HUB.spawn.y;this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;UIManager.close();SaveSystem.save(this);this.message('ÁREA SEGURA · ASSOCIAÇÃO DOS CAÇADORES')}
+returnHub(){this.world=new WorldMap();this.animation=new PlayerAnimation(this.sprites);this.pendingStrikes=[];this.projectiles=[];this.hazards=[];this.impacts=[];this.player.x=HUB.spawn.x;this.player.y=HUB.spawn.y;this.enemies=[];this.corpses=[];this.soldiers=[];this.summoned=false;this.bossDefeated=false;this.chest=false;this.redGate=false;UIManager.close();this.resize();this._camSnap=true;SaveSystem.save(this);this.message('ÁREA SEGURA · ASSOCIAÇÃO DOS CAÇADORES')}
 interact(){let p=this.player;if(this.world.kind==='hub'){const gate=this.gates.nearest(p);if(gate){this.selectedGate=gate;UIManager.open('gate')}else if(dist(p,HUB.merchant)<100)UIManager.open('shop');else if(dist(p,HUB.healer)<100){p.hp=p.maxhp;p.mp=p.maxmp;this.message('HP E MP RESTAURADOS');this.sound.play('alert');this.particles.burst(p.x,p.y,'#5affb0',24,{speed:90,lift:60})}}
  else{let corpse=this.corpses.find(c=>dist(c,p)<75);if(corpse){corpse.tries++;let chance=Math.min(.9,.35+p.stats.INT*.02+(p.level-corpse.level)*.03);if(this.army.length>=armyCap(p)){this.message(`CAPACIDADE DE SOMBRAS ATINGIDA · ${this.army.length}/${armyCap(p)}`);return}this.animation.play('summon',p,.5);this.animation.effect('summon',corpse);this.particles.burst(corpse.x,corpse.y,'#bd59ff',30);this.sound.play('shadow');if(Math.random()<chance){const d=normalizeShadow({name:corpse.name,type:corpse.type,boss:!!corpse.boss,art:corpse.art,level:corpse.level,rank:corpse.boss?'Comandante':'Normal',kills:0,xp:0},p.level);this.army.push(d);
     // Raised on the spot when the army is out: the new shadow joins right where the body lay.
@@ -1991,7 +2036,7 @@ updateCombatFX(dt){
  this.hazards=this.hazards.filter(h=>!h.done&&!(h.kind==='claw'&&h.t<=0));
  for(const im of this.impacts)im.t-=dt;this.impacts=this.impacts.filter(im=>im.t>0);
 }
-update(dt){let p=this.player;this.time+=dt;if(this.panel){if(this.panel==='gate'&&this.selectedGate){const el=$('#gateTime');if(el)el.textContent=fmtTime(this.selectedGate.life)}return}let today=new Date().toLocaleDateString('en-CA');if(today!==this.questDate){this.questDate=today;this.quest=0;this.questDone=false;SaveSystem.save(this)}
+update(dt){let p=this.player;this.time+=dt;this.checkViewLayout(dt);if(this.panel){if(this.panel==='gate'&&this.selectedGate){const el=$('#gateTime');if(el)el.textContent=fmtTime(this.selectedGate.life)}return}let today=new Date().toLocaleDateString('en-CA');if(today!==this.questDate){this.questDate=today;this.quest=0;this.questDone=false;SaveSystem.save(this)}
  p.cool-=dt;p.dashCd-=dt;p.invuln-=dt;p.stealth-=dt;p.slash-=dt;p.hurtTime-=dt;p.slow=Math.max(0,(p.slow||0)-dt);p.comboWindow=(p.comboWindow||0)-dt;p.mp=Math.min(p.maxmp,p.mp+dt*MP_REGEN);if(this.summoned)this.updateArmyMana(dt);
  if(p.poison>0){p.poison-=dt;p.poisonTick=(p.poisonTick||0)-dt;if(p.poisonTick<=0){p.poisonTick=.6;p.hp=Math.max(1,p.hp-(2+p.level*.4));this.particles.burst(p.x,p.y-20,'#7dff5a',4,{speed:40,lift:30})}}
  for(const strike of this.pendingStrikes)strike.delay-=dt;const due=this.pendingStrikes.filter(strike=>strike.delay<=0);this.pendingStrikes=this.pendingStrikes.filter(strike=>strike.delay>0);for(const strike of due)this.attack(.7,110,false,false,true,'mutilation');
@@ -2063,8 +2108,8 @@ drawHazards(){const c=ctx;for(const h of this.hazards){c.save();
  for(const pr of this.projectiles){c.save();c.globalCompositeOperation='lighter';c.fillStyle=pr.color;c.globalAlpha=.35;c.beginPath();c.arc(pr.x,pr.y,pr.size*2,0,7);c.fill();c.globalAlpha=1;c.beginPath();c.arc(pr.x,pr.y,pr.size,0,7);c.fill();c.fillStyle='#ffffff';c.beginPath();c.arc(pr.x,pr.y,pr.size*.45,0,7);c.fill();c.restore()}}
 drawImpacts(){const c=ctx;for(const im of this.impacts){const k=1-im.t/im.max,s=(im.crit?30:20)*(.4+k);c.save();c.translate(im.x,im.y);c.globalCompositeOperation='lighter';c.globalAlpha=1-k;c.fillStyle=im.crit?'#f4d0ff':'#e8ffff';c.beginPath();for(let i=0;i<8;i++){const a=i*Math.PI/4+im.angle,r=i%2?s*.3:s;c.lineTo(Math.cos(a)*r,Math.sin(a)*r)}c.closePath();c.fill();c.strokeStyle=im.crit?'#b06bff':'#3fd6ff';c.lineWidth=2;c.beginPath();c.arc(0,0,s*1.2,0,7);c.stroke();c.globalAlpha=(1-k)*.5;c.strokeStyle='#7b2cff';c.lineWidth=4*(1-k)+1;c.beginPath();c.arc(0,0,s*1.6+8*k,0,7);c.stroke();c.restore()}}
 draw(){ctx.clearRect(0,0,canvas.width,canvas.height);if(!this.started){ctx.fillStyle='#050d18';ctx.fillRect(0,0,canvas.width,canvas.height);return}let p=this.player;
- this.camera.x=clamp(p.x-canvas.width/2,0,Math.max(0,this.world.w-canvas.width));this.camera.y=clamp(p.y-canvas.height/2,0,Math.max(0,this.world.h-canvas.height));const sx=this.shakeMag>0?rand(-1,1)*this.shakeMag:0,sy=this.shakeMag>0?rand(-1,1)*this.shakeMag:0;
- ctx.save();ctx.translate(Math.round(-this.camera.x+sx),Math.round(-this.camera.y+sy));const view={x:this.camera.x,y:this.camera.y,w:canvas.width,h:canvas.height};this.world.draw(ctx,this.time,view);if(this.world.kind==='hub')this.gates.draw(ctx,this.time,this.world);this.drawAtmosphere(ctx);
+ this.updateCamera();if(this.world.kind==='dungeon')this.drawDungeonBackdrop();const sx=this.shakeMag>0?rand(-1,1)*this.shakeMag:0,sy=this.shakeMag>0?rand(-1,1)*this.shakeMag:0;
+ ctx.save();ctx.translate(Math.round(-this.camera.x+sx),Math.round(-this.camera.y+sy));const view={x:this.camera.x,y:this.camera.y,w:canvas.width,h:canvas.height};this.world.draw(ctx,this.time,view);if(this.world.kind==='dungeon')this.drawWorldEdges(ctx,view);if(this.world.kind==='hub')this.gates.draw(ctx,this.time,this.world);this.drawAtmosphere(ctx);
  for(let c of this.corpses){ctx.save();ctx.globalAlpha=Math.min(1,c.life);ctx.fillStyle='#160b27';ctx.beginPath();ctx.ellipse(c.x,c.y+10,24,10,0,0,7);ctx.fill();ctx.shadowColor='#a855f7';ctx.shadowBlur=16;ctx.strokeStyle='#9f4de0';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(c.x,c.y+10,20+Math.sin(this.time*4)*2,7,0,0,7);ctx.stroke();for(let i=0;i<7;i++){let phase=(this.time*16+i*7)%30;ctx.fillStyle=i%2?'#b761f5':'#65238d';ctx.globalAlpha=Math.min(1,c.life)*(1-phase/35);ctx.fillRect(c.x+Math.sin(this.time*3+i*2)*12,c.y+8-phase,3+i%2,4+i%3)}ctx.restore()}
  if(this.bossDefeated&&!this.chest){ctx.fillStyle='#3b211a';ctx.fillRect(1477,580,46,32);ctx.fillStyle='#e9b950';ctx.fillRect(1477,586,46,5);ctx.fillRect(1497,582,5,29);ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=.3+.2*Math.sin(this.time*4);ctx.fillStyle='#ffd27a';ctx.beginPath();ctx.arc(1500,596,40,0,7);ctx.fill();ctx.restore()}
  for(const e of this.enemies)if(e.state==='windup'&&this.fogVisible(e))this.drawTelegraph(e);
